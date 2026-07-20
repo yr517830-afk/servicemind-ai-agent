@@ -131,5 +131,40 @@ if __name__ == "__main__":
         wait_minutes=10,
     )
     assert decide_ticket(vip_refund_ticket, vip_customer).priority == Priority.P1
+    # 9. 支付问题，即使不是 VIP，也必须是 P0
+    assert (
+        decide_ticket(
+            TicketInput("小李", IssueType.PAYMENT, "支付失败", 0),
+            CustomerProfile(1009, "小李"),
+        ).priority
+        == Priority.P0
+    )
 
-    print("8条工单规则测试全部通过！")
+    # 10. 账号问题，即使等待很久，也必须优先判为 P0
+    assert (
+        decide_ticket(
+            TicketInput("小张", IssueType.ACCOUNT, "账号被盗", 999),
+            CustomerProfile(1010, "小张"),
+        ).priority
+        == Priority.P0
+    )
+
+    # 11. 物流工单等待满 120 分钟，应进入 P1
+    assert (
+        decide_ticket(
+            TicketInput("小赵", IssueType.LOGISTICS, "订单未到", 120),
+            CustomerProfile(1011, "小赵", level="VIP", is_vip=True),
+        ).priority
+        == Priority.P1
+    )
+
+    # 12. 退款工单等待很久时，等待超时规则优先于普通退款规则
+    assert (
+        decide_ticket(
+            TicketInput("小孙", IssueType.REFUND, "退款未到账", 180),
+            CustomerProfile(1012, "小孙"),
+        ).priority
+        == Priority.P1
+    )
+    
+    print("12条工单规则测试全部通过！")
