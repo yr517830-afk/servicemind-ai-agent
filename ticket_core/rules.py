@@ -1,3 +1,10 @@
+import logging
+
+from ticket_core.config_loader import (
+    DEFAULT_CONFIG_PATH,
+    load_routing_rules,
+)
+from ticket_core.logging_config import configure_logging
 from ticket_core.models import (
     CustomerProfile,
     IssueType,
@@ -7,53 +14,93 @@ from ticket_core.models import (
 )
 
 
+configure_logging()
+
+logger = logging.getLogger(__name__)
+
+ROUTING_RULES = load_routing_rules()
+
+logger.info(
+    "路由配置加载成功：%s",
+    DEFAULT_CONFIG_PATH,
+)
+
+ROUTING_RULES = load_routing_rules()
+
+def _build_decision(rule_name: str) -> TicketDecision:
+    """根据配置中的规则名称创建工单决策。"""
+
+    rule = ROUTING_RULES[rule_name]
+
+    decision = TicketDecision(
+        priority=Priority(rule["priority"]),
+        assigned_team=rule["assigned_team"],
+        sla_minutes=rule["sla_minutes"],
+        reason=rule["reason"],
+    )
+
+    logger.info(
+        "命中规则=%s，优先级=%s，团队=%s，SLA=%s分钟",
+        rule_name,
+        decision.priority.value,
+        decision.assigned_team,
+        decision.sla_minutes,
+    )
+
+    return decision
+
 def decide_ticket(
     ticket: TicketInput,
     customer: CustomerProfile,
 ) -> TicketDecision:
-    """根据工单和客户信息，生成处理决策。"""
+    """根据工单、客户资料和 JSON 配置生成处理决策。"""
 
-    if ticket.issue_type in (IssueType.PAYMENT, IssueType.ACCOUNT):
-        return TicketDecision(
-            priority=Priority.P0,
-            assigned_team="账号与支付安全组",
-            sla_minutes=15,
-            reason="涉及支付或账号安全，需要最高优先级处理。",
-        )
+    security_rule = ROUTING_RULES["security"]
 
-    if ticket.wait_minutes >= 120:
-        return TicketDecision(
-            priority=Priority.P1,
-            assigned_team="综合客服组",
-            sla_minutes=30,
-            reason="用户等待时间超过 120 分钟。",
-        )
+    if ticket.issue_type.value in security_rule["issue_types"]:
+        return _build_decision("security")
+
+    overdue_rule = ROUTING_RULES["overdue"]
+
+    if ticket.wait_minutes >= overdue_rule["wait_minutes_threshold"]:
+        return _build_decision("overdue")
 
     if customer.is_vip:
-        return TicketDecision(
-            priority=Priority.P1,
-            assigned_team="VIP 客服组",
-            sla_minutes=30,
-            reason="VIP 客户需要优先响应。",
-        )
+        return _build_decision("vip")
 
-    if ticket.issue_type == IssueType.REFUND:
-        return TicketDecision(
-            priority=Priority.P2,
-            assigned_team="退款售后组",
-            sla_minutes=60,
-            reason="普通退款咨询。",
-        )
+    refund_rule = ROUTING_RULES["refund"]
 
-    return TicketDecision(
-        priority=Priority.P3,
-        assigned_team="综合客服组",
-        sla_minutes=120,
-        reason="普通咨询工单。",
-    )
+    if ticket.issue_type.value in refund_rule["issue_types"]:
+        return _build_decision("refund")
+
+    return _build_decision("default")
 
 
 if __name__ == "__main__":
+    demo_ticket = TicketInput(
+        customer_name="配置测试客户",
+        issue_type=IssueType.LOGISTICS,
+        message="查询物流",
+        wait_minutes=0,
+    )
+
+    demo_customer = CustomerProfile(
+        customer_id=2001,
+        name="配置测试客户",
+        level="VIP",
+        is_vip=True,
+    )
+
+    demo_decision = decide_ticket(
+        demo_ticket,
+        demo_customer,
+    )
+
+    print(f"VIP 优先级：{demo_decision.priority.value}")
+    print(f"VIP 处理团队：{demo_decision.assigned_team}")
+    print(f"VIP SLA：{demo_decision.sla_minutes} 分钟")
+    print(f"判断原因：{demo_decision.reason}")
+
     vip_customer = CustomerProfile(
         customer_id=1001,
         name="小王",

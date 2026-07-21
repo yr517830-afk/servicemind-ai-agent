@@ -1,0 +1,35 @@
+{
+  "security": {
+    "issue_types": ["支付", "账号"],
+    "priority": "P0",
+    "assigned_team": "账号与支付安全组",
+    "sla_minutes": 15,
+    "reason": "涉及支付或账号安全，需要最高优先级处理。"
+  },
+  "overdue": {
+    "wait_minutes_threshold": 120,
+    "priority": "P1",
+    "assigned_team": "综合客服组",
+    "sla_minutes": 30,
+    "reason": "客户等待时间已达到阈值，需要升级处理。"
+  },
+  "vip": {
+    "priority": "P1",
+    "assigned_team": "VIP 客服组",
+    "sla_minutes": 30,
+    "reason": "VIP 客户需要优先响应。"
+  },
+  "refund": {
+    "issue_types": ["退款"],
+    "priority": "P2",
+    "assigned_team": "退款售后组",
+    "sla_minutes": 60,
+    "reason": "退款问题由退款售后组处理。"
+  },
+  "default": {
+    "priority": "P3",
+    "assigned_team": "综合客服组",
+    "sla_minutes": 120,
+    "reason": "普通咨询按标准流程处理。"
+  }
+}
