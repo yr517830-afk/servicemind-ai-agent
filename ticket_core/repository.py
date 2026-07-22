@@ -96,6 +96,33 @@ def save_ticket(
     return ticket_id
 
 
+def ticket_exists(
+    ticket: TicketInput,
+    database_path: Path = DATABASE_PATH,
+) -> bool:
+    """判断数据库中是否已经存在相同工单。"""
+
+    initialize_database(database_path)
+
+    with sqlite3.connect(database_path) as connection:
+        existing_ticket = connection.execute(
+            """
+            SELECT 1
+            FROM tickets
+            WHERE customer_name = ?
+              AND issue_type = ?
+              AND message = ?
+            LIMIT 1
+            """,
+            (
+                ticket.customer_name,
+                ticket.issue_type.value,
+                ticket.message,
+            ),
+        ).fetchone()
+
+    return existing_ticket is not None
+
 def list_tickets(
     database_path: Path = DATABASE_PATH,
 ) -> list[sqlite3.Row]:

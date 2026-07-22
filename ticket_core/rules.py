@@ -25,8 +25,6 @@ logger.info(
     DEFAULT_CONFIG_PATH,
 )
 
-ROUTING_RULES = load_routing_rules()
-
 def _build_decision(rule_name: str) -> TicketDecision:
     """根据配置中的规则名称创建工单决策。"""
 
