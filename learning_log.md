@@ -553,3 +553,265 @@ Day 5 将前四天的模型、校验、规则、配置、日志和数据库连�
 - [x] 能够查询历史工单
 - [x] 能够拦截重复提交
 - [x] Ruff 检查通过
+
+# Day 6 学习日志：pytest 测试与重构
+
+日期：2026-07-24
+
+## 今日目标
+
+学习 pytest、fixture 和 parametrize，为工单输入校验与规则引擎建立 15 个自动化测试，并使用 Ruff 检查项目代码质量。
+
+## 今日完成内容
+
+### 1. 安装并验证 pytest
+
+当前项目虚拟环境中的 pytest 版本为：
+
+```text
+pytest 9.1.1
+```
+
+安装位置：
+
+```text
+E:\AIProjects\servicemind-ai-agent\.venv\Lib\site-packages
+```
+
+这证明 pytest 安装在当前项目的虚拟环境中，不会影响系统中的其他 Python 项目。
+
+### 2. 创建测试目录
+
+创建了以下测试结构：
+
+```text
+tests/
+├── conftest.py
+├── test_validators.py
+└── test_rules.py
+```
+
+其中：
+
+- `conftest.py`：保存多个测试共享的 fixture。
+- `test_validators.py`：测试工单输入校验。
+- `test_rules.py`：测试工单规则引擎。
+
+### 3. 使用 fixture 准备测试数据
+
+在 `conftest.py` 中创建了：
+
+- `normal_customer`：普通客户 fixture。
+- `vip_customer`：VIP 客户 fixture。
+- `ticket_factory`：测试工单创建工厂。
+
+fixture 可以让多个测试复用相同的准备逻辑，避免重复创建客户和工单对象。
+
+### 4. 编写 7 个输入校验测试
+
+为 `validate_ticket_input()` 编写了以下测试：
+
+1. 合法工单可以通过校验。
+2. 客户名称为空时抛出异常。
+3. 客户名称只有空格时抛出异常。
+4. 工单消息为空时抛出异常。
+5. 工单消息只有空格时抛出异常。
+6. 等待时间小于零时抛出异常。
+7. 问题类型不是 `IssueType` 时抛出异常。
+
+使用：
+
+```python
+with pytest.raises(...):
+```
+
+验证指定异常是否被正确抛出。
+
+### 5. 使用 parametrize 生成多组测试
+
+使用：
+
+```python
+@pytest.mark.parametrize(...)
+```
+
+让同一个测试函数使用不同输入运行多次。
+
+例如，客户名称测试分别使用：
+
+```python
+""
+"   "
+```
+
+从而覆盖空字符串和纯空格两种情况。
+
+### 6. 编写 8 个规则引擎测试
+
+为 `decide_ticket()` 测试了：
+
+1. 支付问题命中 P0。
+2. 账号问题命中 P0。
+3. 等待满 120 分钟命中 P1。
+4. VIP 物流工单命中 P1。
+5. 普通退款工单命中 P2。
+6. 普通咨询工单命中 P3。
+7. 安全规则优先于等待超时和 VIP 规则。
+8. 等待超时规则优先于 VIP 和普通退款规则。
+
+每个测试同时验证：
+
+```python
+assert decision.priority == expected_priority
+assert decision.assigned_team == expected_team
+assert decision.sla_minutes > 0
+assert decision.reason
+```
+
+### 7. 完成全部自动化测试
+
+运行：
+
+```powershell
+python -m pytest -v
+```
+
+最终结果：
+
+```text
+collected 15 items
+15 passed
+```
+
+简洁模式命令：
+
+```powershell
+python -m pytest -q
+```
+
+最终输出：
+
+```text
+...............    [100%]
+15 passed in 0.19s
+```
+
+### 8. 使用 Ruff 检查代码
+
+运行：
+
+```powershell
+ruff check .
+```
+
+Ruff 发现 `test_rules.py` 中存在无用导入：
+
+```python
+from email import message
+```
+
+删除无用导入后再次检查，结果为：
+
+```text
+All checks passed!
+```
+
+删除代码后重新运行全部测试，15 个测试仍然通过，证明清理没有破坏功能。
+
+## 今日遇到的问题
+
+### 问题一：parametrize 参数名不一致
+
+在问题描述测试中，装饰器写的是：
+
+```python
+"customer_name"
+```
+
+函数参数却写成：
+
+```python
+message
+```
+
+pytest 因此无法收集测试，并提示：
+
+```text
+function uses no argument 'customer_name'
+```
+
+将装饰器参数改为 `message` 后解决。
+
+### 问题二：异常消息不一致
+
+业务代码中的消息是：
+
+```text
+工单消息不能为空
+```
+
+测试最初写成了“工单信息不能为空”。测试预期必须与真实异常内容一致。
+
+### 问题三：预期团队名称写错
+
+测试中曾出现以下错误名称：
+
+```text
+账户与支付安全组
+VIP客服组
+```
+
+配置中的准确名称是：
+
+```text
+账号与支付安全组
+VIP 客服组
+```
+
+自动化测试成功发现了肉眼容易忽略的文字和空格差异。
+
+### 问题四：Ruff 发现无用导入
+
+`from email import message` 没有被测试使用。删除后 Ruff 和 pytest 都重新通过。
+
+## 今日收获
+
+1. 理解 pytest 如何自动发现测试文件和测试函数。
+2. 学会使用 fixture 复用测试准备数据。
+3. 学会使用 parametrize 批量生成测试场景。
+4. 学会使用 `pytest.raises()` 验证异常。
+5. 学会测试正常路径、异常路径和边界值。
+6. 学会验证规则之间的优先级。
+7. 学会通过测试失败信息区分业务错误和测试预期错误。
+8. 学会在清理或重构后重新运行测试。
+9. 理解自动化测试是代码重构的安全网。
+
+## 对求职的帮助
+
+Day 6 证明项目不仅“可以运行”，还具有自动化质量保障能力。
+
+能够体现：
+
+- pytest 自动化测试能力
+- fixture 测试数据复用能力
+- parametrize 参数化测试能力
+- 异常测试与边界测试能力
+- 业务规则优先级测试能力
+- 回归测试意识
+- Ruff 静态检查能力
+- 重构后重新验证的工程习惯
+
+## 面试表达
+
+我使用 pytest 为 ServiceMind 的输入校验和工单规则引擎建立了 15 个自动化测试，通过 fixture 复用普通客户、VIP 客户和工单工厂，并使用 parametrize 覆盖不同问题类型、异常输入、边界值和规则优先级。代码清理后重新运行全部测试和 Ruff，确保修改没有造成回归。
+
+## Day 6 完成情况
+
+- [x] pytest 安装在项目虚拟环境
+- [x] 创建 tests 测试目录
+- [x] 创建 3 个 fixture
+- [x] 完成 7 个输入校验测试
+- [x] 完成 8 个规则引擎测试
+- [x] 15 个测试全部通过
+- [x] Ruff 检查通过
+- [x] 清理代码后重新执行回归测试

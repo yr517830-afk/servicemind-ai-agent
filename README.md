@@ -56,12 +56,27 @@ ServiceMind 是一个使用 Python 开发的智能客服工单系统。
 - 使用 `ticket_exists()` 拦截重复工单
 - 完成“录入 → 判断 → 保存 → 查询”完整业务流程
 
+### Day 6：pytest 测试与重构
+
+- 使用 pytest 建立自动化测试体系
+- 使用 fixture 复用普通客户、VIP 客户和工单工厂
+- 使用 parametrize 批量生成测试场景
+- 完成 7 个输入校验测试
+- 完成 8 个规则引擎测试
+- 覆盖正常路径、异常路径、边界值和规则优先级
+- 全部 15 个测试通过
+- Ruff 全项目检查通过
+
 ## 项目结构
 
 ```text
 servicemind-ai-agent/
 ├── config/
 │   └── routing_rules.json
+├── tests/
+│   ├── conftest.py
+│   ├── test_rules.py
+│   └── test_validators.py
 ├── ticket_core/
 │   ├── __init__.py
 │   ├── models.py
@@ -87,6 +102,7 @@ servicemind-ai-agent/
 ## 运行环境
 
 - Python 3.14
+- pytest 9.1.1
 - Windows PowerShell
 - PyCharm
 - SQLite
@@ -110,22 +126,42 @@ CLI 支持：
 0. 退出系统
 ```
 
+### 运行全部自动化测试
+
+详细模式：
+
+```powershell
+python -m pytest -v
+```
+
+简洁模式：
+
+```powershell
+python -m pytest -q
+```
+
+当前测试结果：
+
+```text
+15 passed
+```
+
+### 单独运行输入校验测试
+
+```powershell
+python -m pytest tests/test_validators.py -v
+```
+
+### 单独运行规则引擎测试
+
+```powershell
+python -m pytest tests/test_rules.py -v
+```
+
 ### 检查配置文件
 
 ```powershell
 python -m ticket_core.config_loader
-```
-
-### 测试输入校验
-
-```powershell
-python -m ticket_core.validators
-```
-
-### 测试工单规则
-
-```powershell
-python -m ticket_core.rules
 ```
 
 ### 测试 SQLite 数据持久化
@@ -139,6 +175,29 @@ python -m ticket_core.repository
 ```powershell
 ruff check .
 ```
+
+## 自动化测试覆盖
+
+### 输入校验：7个测试
+
+- 合法工单
+- 空客户名称
+- 纯空格客户名称
+- 空工单消息
+- 纯空格工单消息
+- 负数等待时间
+- 错误问题类型
+
+### 规则引擎：8个测试
+
+- 支付安全工单
+- 账号安全工单
+- 等待超时工单
+- VIP 物流工单
+- 普通退款工单
+- 普通咨询工单
+- 安全规则优先级
+- 超时规则优先级
 
 ## 已实现的核心功能
 
@@ -154,6 +213,8 @@ ruff check .
 - 用户确认保存
 - 历史工单查询
 - 重复工单拦截
+- pytest 自动化测试
+- Ruff 代码质量检查
 
 ## 项目亮点
 
@@ -165,12 +226,14 @@ ruff check .
 6. 使用参数化 SQL，避免直接拼接用户输入。
 7. 使用 CLI 串联录入、判断、保存和查询流程。
 8. 在写入数据库前检查重复工单。
-9. 使用 Ruff 保持代码规范。
+9. 使用 pytest fixture 和 parametrize 建立 15 个自动化测试。
+10. 使用 Ruff 保持代码规范，并在代码清理后执行回归测试。
 
 ## 后续计划
 
 - 使用 FastAPI 提供 HTTP 接口
 - 接入大模型进行工单分类和回复生成
-- 增加自动化测试
+- 增加测试覆盖率统计和数据库测试
 - 增加用户认证和权限控制
 - 完成项目部署
+
