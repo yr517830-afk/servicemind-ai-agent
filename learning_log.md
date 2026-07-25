@@ -815,3 +815,233 @@ Day 6 证明项目不仅“可以运行”，还具有自动化质量保障能�
 - [x] 15 个测试全部通过
 - [x] Ruff 检查通过
 - [x] 清理代码后重新执行回归测试
+
+# Day 7 学习日志：第一周复盘与交付验证
+
+日期：2026-07-25
+
+## 今日目标
+
+整理项目说明和运行环境，验证其他用户能否按照 README 独立运行项目，并总结第一周遇到的问题和设计取舍。
+
+## 今日完成内容
+
+### 1. 完善 README
+
+补充了以下内容：
+
+- 项目简介
+- Day 1～Day 6 学习进度
+- 项目目录结构
+- 环境要求
+- GitHub 克隆方法
+- 虚拟环境创建和激活方法
+- 项目依赖安装方法
+- CLI运行方法
+- pytest测试命令
+- Ruff检查命令
+- 项目亮点和后续计划
+
+### 2. 创建依赖文件
+
+在项目根目录创建：
+
+```text
+requirements.txt
+```
+
+内容为：
+
+```text
+pytest==9.1.1
+ruff==0.15.22
+```
+
+其他用户可以运行：
+
+```powershell
+python -m pip install -r requirements.txt
+```
+
+安装项目需要的测试和代码检查工具。
+
+### 3. 完成全新环境验证
+
+从GitHub重新克隆项目：
+
+```powershell
+git clone https://github.com/yr517830-afk/servicemind-ai-agent.git servicemind-ai-agent-check
+```
+
+在全新的项目目录中依次完成：
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -r requirements.txt
+python -m pytest -q
+ruff check .
+python ticket_cli.py
+```
+
+最终结果：
+
+```text
+15 passed
+All checks passed!
+```
+
+CLI系统能够正常启动和退出。
+
+这证明其他用户可以只按照README完成项目安装和运行。
+
+
+### 4. 上传Day 7成果
+
+提交信息：
+
+```text
+Day 7: Improve README and add dependency setup
+```
+
+提交编号：
+
+```text
+a55fabf
+```
+
+README和`requirements.txt`已经上传到GitHub。
+
+## 本周遇到的3个主要问题
+
+### 问题一：命令运行环境容易混淆
+
+最初没有完全区分：
+
+- PowerShell终端
+- Python交互环境
+- PyCharm运行窗口
+
+例如曾将：
+
+```powershell
+python -V
+```
+
+写成：
+
+```powershell
+python-V
+```
+
+也曾在Python交互环境中输入Git命令。
+
+通过这些问题，我理解了不同运行环境的用途，也认识到命令、参数和空格必须准确书写。
+
+### 问题二：类名拼写不一致
+
+曾将：
+
+```python
+TicketInput
+TicketDecision
+```
+
+拼写成：
+
+```python
+TicketInupt
+TicketDicison
+```
+
+导致其他模块出现`ImportError`和`NameError`。
+
+这让我理解了：类名和函数名属于模块之间的接口，命名不一致会影响所有依赖模块。
+
+### 问题三：配置读取和测试参数错误
+
+读取JSON时曾错误使用：
+
+```python
+json.loads(file)
+```
+
+正确方式是：
+
+```python
+json.load(file)
+```
+
+编写pytest测试时，也遇到过参数化名称与测试函数参数不一致的问题。
+
+这让我理解了：
+
+- `json.load()`读取文件对象。
+- `json.loads()`解析JSON字符串。
+- pytest参数名必须与测试函数参数一致。
+- 自动化测试可以帮助发现细小错误。
+
+## 本周的3个设计取舍
+
+### 取舍一：JSON配置与硬编码
+
+最终选择将优先级、团队和SLA写入JSON配置，而不是全部写死在Python代码中。
+
+这样修改业务规则时不需要修改核心代码，更接近真实项目的配置化设计。
+
+### 取舍二：SQLite与大型数据库
+
+第一阶段选择SQLite，没有直接使用MySQL或PostgreSQL。
+
+SQLite不需要安装数据库服务，适合本地学习、快速开发和项目演示。以后开发Web服务时，可以再迁移到PostgreSQL。
+
+### 取舍三：CLI与网页界面
+
+第一周优先开发CLI，没有立即制作网页界面。
+
+这样可以先验证数据模型、输入校验、规则引擎和数据库流程，减少界面开发带来的额外复杂度。
+
+后续可以使用FastAPI为现有核心逻辑提供HTTP接口。
+
+## 今日收获
+
+1. 学会使用`requirements.txt`记录项目依赖。
+2. 学会编写能够指导他人运行项目的README。
+3. 学会通过全新克隆验证项目可复现性。
+4. 理解“我的电脑能运行”不等于“其他人能运行”。
+5. 学会用演示视频展示项目功能。
+6. 学会总结真实开发问题和解决过程。
+7. 学会分析技术方案的优点、限制和适用场景。
+8. 完成第一周项目成果的整理和交付验证。
+
+## 对求职的帮助
+
+Day 7让项目从“个人练习代码”变成了“可以公开展示的GitHub项目”。
+
+能够体现：
+
+- 项目文档编写能力
+- Python环境管理能力
+- 依赖管理能力
+- GitHub项目交付能力
+- 自动化测试能力
+- 项目可复现意识
+- 技术方案分析能力
+- 项目演示与表达能力
+
+## 面试表达
+
+我为ServiceMind项目补充了完整的README和依赖文件，并从GitHub重新克隆项目，在全新的虚拟环境中完成依赖安装、15个自动化测试、Ruff检查和CLI启动验证，确保其他用户能够按照文档独立运行项目。并总结了配置化、数据库和用户界面方面的设计取舍。
+
+## Day 7完成情况
+
+- [x] 完善README
+- [x] 创建requirements.txt
+- [x] 上传README和依赖文件
+- [x] 从GitHub重新克隆项目
+- [x] 在全新环境中安装依赖
+- [x] 15个pytest测试全部通过
+- [x] Ruff检查通过
+- [x] CLI在全新环境中正常运行
+- [x] 总结本周3个主要问题
+- [x] 总结本周3个设计取舍
