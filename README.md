@@ -108,6 +108,55 @@ servicemind-ai-agent/
 - SQLite
 - Git
 
+## 安装步骤
+
+### 1. 克隆项目
+
+```powershell
+git clone https://github.com/yr517830-afk/servicemind-ai-agent.git
+cd servicemind-ai-agent
+```
+
+### 2. 创建 Python 虚拟环境
+
+```powershell
+python -m venv .venv
+```
+
+### 3. 激活虚拟环境
+
+Windows PowerShell：
+
+```powershell
+.\.venv\Scripts\Activate.ps1
+```
+
+激活成功后，终端开头会显示：
+
+```text
+(.venv)
+```
+
+### 4. 安装项目依赖
+
+```powershell
+python -m pip install -r requirements.txt
+```
+
+### 5. 验证项目环境
+
+```powershell
+python -m pytest -q
+ruff check .
+```
+
+预期结果：
+
+```text
+15 passed
+All checks passed!
+```
+
 ## 运行方式
 
 进入项目根目录并激活虚拟环境后运行。
