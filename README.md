@@ -79,16 +79,36 @@ ServiceMind 是一个使用 Python 开发的智能客服工单系统。
 - 总结本周3个主要问题和3个设计取舍
 - 项目达到“其他用户按照README可以运行”的验收标准
 
+### Day 8：FastAPI起步与请求校验
+
+- 安装FastAPI、Uvicorn、Pydantic和httpx2
+- 创建`app/main.py`和`app/schemas.py`
+- 实现`GET /health`健康检查接口
+- 实现`POST /tickets`工单创建接口
+- 定义`TicketCreate`请求模型
+- 定义`TicketResponse`响应模型
+- 使用Pydantic校验字符串、枚举和数值范围
+- 使用Swagger UI在`/docs`调用接口
+- 非法请求能够返回清晰的422错误
+- 新增3个FastAPI自动化测试
+- 全项目18个pytest测试通过
+- Ruff全项目检查通过
+
 ## 项目结构
 
 ```text
 servicemind-ai-agent/
 ├── config/
 │   └── routing_rules.json
+├── app/
+│   ├── __init__.py
+│   ├── main.py
+│   └── schemas.py
 ├── tests/
 │   ├── conftest.py
 │   ├── test_rules.py
 │   └── test_validators.py
+│   ├── test_api.py
 ├── ticket_core/
 │   ├── __init__.py
 │   ├── models.py
@@ -173,6 +193,26 @@ All checks passed!
 
 进入项目根目录并激活虚拟环境后运行。
 
+### 启动FastAPI服务
+
+```powershell
+python -m uvicorn app.main:app --reload
+```
+
+服务启动后可以访问：
+
+```text
+健康检查：http://127.0.0.1:8000/health
+接口文档：http://127.0.0.1:8000/docs
+```
+
+当前接口：
+
+```text
+GET  /health
+POST /tickets
+```
+
 ### 启动命令行工单系统
 
 ```powershell
@@ -204,7 +244,7 @@ python -m pytest -q
 当前测试结果：
 
 ```text
-15 passed
+18 passed
 ```
 
 ### 单独运行输入校验测试
@@ -259,6 +299,12 @@ ruff check .
 - 普通咨询工单
 - 安全规则优先级
 - 超时规则优先级
+
+### FastAPI接口：3个测试
+
+- 健康检查返回200
+- 合法工单创建返回201
+- 非法工单请求返回422
 
 ## 已实现的核心功能
 

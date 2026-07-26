@@ -1045,3 +1045,359 @@ Day 7让项目从“个人练习代码”变成了“可以公开展示的GitHub
 - [x] CLI在全新环境中正常运行
 - [x] 总结本周3个主要问题
 - [x] 总结本周3个设计取舍
+
+# Day 8 学习日志：FastAPI起步与请求校验
+
+日期：2026-07-26
+
+## 今日目标
+
+把ServiceMind从只能在本地终端运行的CLI程序，升级为可以通过HTTP访问的Web API，并使用Pydantic自动校验请求数据。
+
+## 今日完成内容
+
+### 1. 安装FastAPI相关依赖
+
+安装：
+
+```powershell
+python -m pip install "fastapi[standard]"
+```
+
+当前主要版本：
+
+```text
+FastAPI 0.140.0
+Uvicorn 0.51.0
+Pydantic 2.13.4
+httpx2 2.9.1
+```
+
+同时更新了`requirements.txt`，确保其他用户可以安装相同版本的依赖。
+
+### 2. 创建FastAPI应用目录
+
+新增项目结构：
+
+```text
+app/
+├── __init__.py
+├── main.py
+└── schemas.py
+```
+
+文件作用：
+
+- `__init__.py`：将`app`标记为Python包。
+- `main.py`：创建FastAPI应用并注册接口。
+- `schemas.py`：定义API请求和响应的数据结构。
+
+### 3. 创建FastAPI应用
+
+在`main.py`中创建：
+
+```python
+app = FastAPI(
+    title="ServiceMind API",
+    description="智能客服工单系统 HTTP API",
+    version="0.1.0",
+)
+```
+
+这个`app`对象是整个HTTP服务的入口。
+
+### 4. 实现健康检查接口
+
+实现：
+
+```text
+GET /health
+```
+
+返回：
+
+```json
+{
+  "status": "ok",
+  "service": "ServiceMind"
+}
+```
+
+浏览器和Swagger UI调用结果：
+
+```text
+200 OK
+```
+
+健康检查接口可以用于判断服务是否正常启动。
+
+### 5. 定义TicketCreate请求模型
+
+使用Pydantic定义创建工单时允许提交的字段：
+
+- `customer_name`
+- `issue_type`
+- `message`
+- `wait_minutes`
+- `is_vip`
+
+通过`Field`设置：
+
+- 字符串最小长度
+- 字符串最大长度
+- 等待时间不能小于0
+- 默认值
+- Swagger文档示例
+
+### 6. 定义TicketResponse响应模型
+
+`TicketResponse`继承`TicketCreate`，并增加：
+
+```text
+ticket_id
+status
+```
+
+这样可以复用请求模型已有字段，同时明确接口成功后应该返回的数据结构。
+
+### 7. 实现工单创建接口
+
+实现：
+
+```text
+POST /tickets
+```
+
+合法请求示例：
+
+```json
+{
+  "customer_name": "小王",
+  "issue_type": "物流",
+  "message": "我的订单什么时候送到？",
+  "wait_minutes": 15,
+  "is_vip": true
+}
+```
+
+接口成功返回：
+
+```text
+201 Created
+```
+
+目前`ticket_id`暂时固定为1，主要用于学习请求模型、响应模型和接口校验。后续再连接现有规则引擎与SQLite数据库。
+
+### 8. 使用自动接口文档
+
+启动服务：
+
+```powershell
+python -m uvicorn app.main:app --reload
+```
+
+访问：
+
+```text
+http://127.0.0.1:8000/docs
+```
+
+FastAPI自动生成Swagger UI，可以直接查看和调用：
+
+```text
+GET  /health
+POST /tickets
+```
+
+### 9. 验证422异常响应
+
+提交以下非法数据：
+
+```json
+{
+  "customer_name": "",
+  "issue_type": "售后",
+  "message": "",
+  "wait_minutes": -10,
+  "is_vip": false
+}
+```
+
+接口返回：
+
+```text
+422 Unprocessable Entity
+```
+
+错误响应准确指出：
+
+- 客户名称太短
+- 问题类型不属于已有枚举
+- 问题描述太短
+- 等待时间不能小于0
+
+说明非法请求在进入接口函数之前，已经被Pydantic拦截。
+
+### 10. 新增API自动化测试
+
+新增：
+
+```text
+tests/test_api.py
+```
+
+包含3个测试：
+
+1. 健康检查返回200。
+2. 合法工单创建返回201。
+3. 非法工单请求返回422。
+
+测试命令：
+
+```powershell
+python -m pytest tests/test_api.py -v
+```
+
+结果：
+
+```text
+3 passed
+```
+
+### 11. 处理测试客户端弃用警告
+
+第一次运行API测试时出现：
+
+```text
+StarletteDeprecationWarning
+```
+
+警告原因是测试客户端仍在使用旧`httpx`兼容方式。
+
+安装：
+
+```powershell
+python -m pip install httpx2
+```
+
+重新运行测试后：
+
+```text
+3 passed
+```
+
+并且警告消失。
+
+### 12. 完成全项目回归测试
+
+运行：
+
+```powershell
+python -m pytest -q
+ruff check .
+```
+
+最终结果：
+
+```text
+18 passed
+All checks passed!
+```
+
+这说明新增FastAPI功能没有破坏前七天已经完成的业务逻辑。
+
+## 今日遇到的问题
+
+### 问题一：浏览器提示连接被拒绝
+
+浏览器访问`127.0.0.1`时曾出现：
+
+```text
+ERR_CONNECTION_REFUSED
+```
+
+原因是Uvicorn服务器已经停止，没有程序监听8000端口。
+
+重新运行：
+
+```powershell
+python -m uvicorn app.main:app --reload
+```
+
+并保持终端运行后解决。
+
+### 问题二：根路径返回404
+
+访问：
+
+```text
+http://127.0.0.1:8000/
+```
+
+终端显示：
+
+```text
+GET / 404 Not Found
+```
+
+这是因为当前只定义了`/health`和`/tickets`，没有定义`/`接口，并不代表FastAPI启动失败。
+
+### 问题三：TestClient出现弃用警告
+
+API测试虽然通过，但Starlette提示旧`httpx`兼容方式已经弃用。
+
+安装`httpx2`后，API测试继续通过并且警告消失。
+
+这让我理解了：测试通过不代表可以忽略所有警告，弃用警告可能意味着未来升级后代码会失效。
+
+## 今日收获
+
+1. 理解HTTP API与CLI程序的区别。
+2. 学会创建FastAPI应用对象。
+3. 学会使用装饰器注册GET和POST接口。
+4. 学会使用Uvicorn启动ASGI服务。
+5. 学会使用Pydantic定义请求和响应模型。
+6. 学会设置字符串、枚举和数值校验规则。
+7. 学会使用Swagger UI查看和调用接口。
+8. 理解200、201、404和422状态码。
+9. 学会使用TestClient测试FastAPI接口。
+10. 学会处理第三方库弃用警告。
+11. 学会在新增功能后运行全项目回归测试。
+
+## 对求职的帮助
+
+Day 8让ServiceMind从命令行项目升级为具有HTTP接口的后端应用。
+
+能够体现：
+
+- FastAPI后端开发能力
+- REST API基础设计能力
+- Pydantic数据建模能力
+- HTTP状态码理解
+- Swagger接口文档使用能力
+- 请求和响应校验能力
+- API自动化测试能力
+- 第三方依赖与兼容性处理能力
+- 回归测试意识
+
+## 面试表达
+
+我使用FastAPI为ServiceMind增加了HTTP服务入口，实现了健康检查和工单创建接口，并使用Pydantic定义请求与响应模型。接口能够自动校验字符串长度、问题类型和等待时间，非法请求会返回包含具体字段信息的422响应。我还使用TestClient编写了3个API测试，最终全项目18个测试和Ruff检查全部通过。
+
+## Day 8完成情况
+
+- [x] 安装FastAPI标准依赖
+- [x] 创建app应用目录
+- [x] 创建FastAPI应用
+- [x] 实现GET /health
+- [x] 定义TicketCreate
+- [x] 定义TicketResponse
+- [x] 实现POST /tickets
+- [x] Swagger UI可以调用接口
+- [x] 合法请求返回201
+- [x] 非法请求返回422
+- [x] 新增3个API自动化测试
+- [x] 解决TestClient弃用警告
+- [x] 全项目18个测试通过
+- [x] Ruff检查通过
+- [x] README已更新
