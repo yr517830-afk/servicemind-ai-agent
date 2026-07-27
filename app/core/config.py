@@ -10,6 +10,7 @@ class Settings(BaseSettings):
     app_version: str = "0.1.0"
     debug: bool = False
     database_path: str = "data/servicemind.db"
+    database_url: str = "sqlite:///data/servicemind.db"
     routing_rules_path: str = "config/routing_rules.json"
 
     model_config = SettingsConfigDict(

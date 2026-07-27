@@ -1,7 +1,8 @@
 # ServiceMind AI Agent
 
-ServiceMind 是一个使用 Python 开发的智能客服工单系统。  
-项目可以校验客户输入、判断工单优先级、分配处理团队、计算 SLA，并将工单保存到 SQLite 数据库。
+ServiceMind 是一个使用 Python 和 FastAPI 开发的智能客服工单系统。
+项目支持客户输入校验、工单优先级判断、处理团队分配、SLA 计算、CLI 操作和 HTTP API。目前保留 SQLite 作为第一阶段 CLI 数据库，同时使用 Docker、PostgreSQL 和 SQLAlchemy 建立客户、订单与工单的关系型数据模型。
+当前 PostgreSQL ORM 已完成建表、种子数据和关联查询；FastAPI CRUD 与 PostgreSQL 的正式连接将在 Day 11 完成。
 
 ## 当前学习进度
 
@@ -110,24 +111,72 @@ ServiceMind 是一个使用 Python 开发的智能客服工单系统。
 - 全项目 20 个 pytest 测试通过
 - Ruff 全项目检查通过
 
-当前调用结构：
+Day 9 阶段的真实调用结构：
 
 ```text
-HTTP 请求
+POST /tickets
     ↓
 API 路由层
     ↓
 Service 业务层
     ↓
+返回临时响应
+
 Repository 数据访问层
     ↓
 SQLite 数据库
 ```
 
+说明：Repository 封装已经建立，但当时尚未接入 FastAPI 工单创建流程。
+
+### Day 10：PostgreSQL 与 SQLAlchemy ORM
+
+- 安装并配置 Docker Desktop 和 WSL 2
+- 使用 `compose.yaml` 启动 PostgreSQL 17
+- 使用 Docker 命名卷持久化数据库数据
+- 使用 `.env` 管理数据库名称、用户、密码和连接 URL
+- 安装 SQLAlchemy 2.0.51 和 psycopg 3.3.4
+- 创建统一的 `Base`、`engine` 和 `SessionLocal`
+- 创建 `Customer`、`Order` 和 `Ticket` ORM 模型
+- 建立客户与订单、客户与工单、订单与工单的外键关系
+- 使用 `Numeric` 和 `Decimal` 精确保存订单金额
+- 使用 ORM 插入可重复执行的种子数据
+- 使用 `selectinload()` 和 `joinedload()` 查询关联实体
+- 新增 2 个 ORM metadata 自动化测试
+- 全项目 22 个 pytest 测试通过
+- Ruff 全项目检查通过
+- PostgreSQL 容器健康检查通过
+
+当前数据链路：
+
+```text
+CLI 工单流程
+    ↓
+ticket_core
+    ↓
+SQLite
+
+ORM 验证脚本
+    ↓
+SQLAlchemy Session
+    ↓
+PostgreSQL 17
+
+FastAPI
+    ↓
+API 路由
+    ↓
+Service
+    ↓
+当前返回临时响应
+    ↓
+Day 11 接入 PostgreSQL CRUD
+```
+
+
 ## 项目结构
 
 ```text
-
 servicemind-ai-agent/
 ├── app/
 │   ├── api/
@@ -138,7 +187,11 @@ servicemind-ai-agent/
 │   │       └── tickets.py
 │   ├── core/
 │   │   ├── __init__.py
-│   │   └── config.py
+│   │   ├── config.py
+│   │   └── database.py
+│   ├── models/
+│   │   ├── __init__.py
+│   │   └── entities.py
 │   ├── repositories/
 │   │   ├── __init__.py
 │   │   └── ticket_repository.py
@@ -152,10 +205,15 @@ servicemind-ai-agent/
 │   └── main.py
 ├── config/
 │   └── routing_rules.json
+├── scripts/
+│   ├── __init__.py
+│   ├── query_database.py
+│   └── seed_database.py
 ├── tests/
 │   ├── conftest.py
 │   ├── test_api.py
 │   ├── test_config.py
+│   ├── test_models.py
 │   ├── test_rules.py
 │   └── test_validators.py
 ├── ticket_core/
@@ -167,12 +225,9 @@ servicemind-ai-agent/
 │   ├── repository.py
 │   ├── rules.py
 │   └── validators.py
-├── data/
-│   └── servicemind.db
-├── logs/
-│   └── servicemind.log
 ├── .env.example
 ├── .gitignore
+├── compose.yaml
 ├── day1_python_review.py
 ├── learning_log.md
 ├── README.md
@@ -180,7 +235,7 @@ servicemind-ai-agent/
 └── ticket_cli.py
 ```
 
->数据库、日志和 `.env` 属于本地运行文件，已经通过 `.gitignore` 排除，不会上传到 GitHub；仓库仅提供 `.env.example` 配置模板。
+> 数据库、日志和 `.env` 属于本地运行文件，已经通过 `.gitignore` 排除，不会上传到 GitHub；仓库仅提供 `.env.example` 配置模板。
 
 
 ## 运行环境
@@ -191,6 +246,11 @@ servicemind-ai-agent/
 - PyCharm
 - SQLite
 - Git
+- Docker Desktop 4.83
+- Docker Compose 5.3
+- PostgreSQL 17
+- SQLAlchemy 2.0.51
+- psycopg 3.3.4
 
 ## 安装步骤
 
@@ -227,23 +287,88 @@ Windows PowerShell：
 python -m pip install -r requirements.txt
 ```
 
-### 5. 验证项目环境
+### 5. 创建本地环境配置
+
+```powershell
+Copy-Item .env.example .env
+```
+
+打开 `.env`，修改 `POSTGRES_PASSWORD`，并将 `DATABASE_URL`
+中的密码同步修改为相同值，否则 SQLAlchemy 将无法连接数据库。
+
+`.env` 已被 Git 忽略，不能上传或公开其中的真实数据库密码。
+
+### 6. 启动 PostgreSQL
+
+确保 Docker Desktop 正常运行，然后执行：
+
+```powershell
+docker compose up -d postgres
+docker compose ps
+```
+
+PostgreSQL 状态应显示：
+
+```text
+healthy
+```
+
+### 7. 创建数据表并插入演示数据
+
+```powershell
+python -c "import app.models; from app.core.database import Base, engine; Base.metadata.create_all(bind=engine)"
+python -m scripts.seed_database
+python -m scripts.query_database
+```
+
+### 8. 验证项目
 
 ```powershell
 python -m pytest -q
 ruff check .
+python -m pip check
 ```
 
 预期结果：
 
 ```text
-20 passed
+22 passed
 All checks passed!
+No broken requirements found.
 ```
 
 ## 运行方式
 
 进入项目根目录并激活虚拟环境后运行。
+
+### PostgreSQL 数据库
+
+启动：
+
+```powershell
+docker compose up -d postgres
+```
+
+查看状态：
+
+```powershell
+docker compose ps
+```
+
+停止容器：
+
+```powershell
+docker compose down
+```
+
+停止容器不会删除命名卷中的数据。
+
+查询 ORM 演示数据：
+
+```powershell
+python -m scripts.query_database
+```
+
 
 ### 启动FastAPI服务
 
@@ -296,7 +421,7 @@ python -m pytest -q
 当前测试结果：
 
 ```text
-20 passed
+22 passed
 ```
 
 ### 单独运行输入校验测试
@@ -363,41 +488,58 @@ ruff check .
 - 验证未设置环境变量时使用默认配置
 - 验证环境变量能够覆盖默认配置
 
+### ORM 模型：2个测试
+
+- 验证 `customers`、`orders` 和 `tickets` 三张表完成注册
+- 验证订单与工单的三个外键关系
+
 ## 已实现的核心功能
 
-- 工单和客户数据模型
+- 工单、客户和决策领域模型
 - 输入参数校验与自定义异常
-- 工单优先级判断
-- 处理团队自动分配
-- SLA 自动计算
-- JSON 动态配置
+- 工单优先级判断、团队分配和 SLA 计算
+- JSON 动态业务规则配置
 - 运行日志记录
 - SQLite 工单持久化
-- CLI 工单录入与结果预览
-- 用户确认保存
-- 历史工单查询
+- CLI 工单录入、预览、保存和历史查询
 - 重复工单拦截
-- pytest 自动化测试
+- FastAPI 健康检查和工单创建接口
+- Pydantic 请求与响应校验
+- API、Schema、Service、Repository 和 Core 分层
+- `pydantic-settings` 环境配置管理
+- Docker Compose PostgreSQL 开发环境
+- SQLAlchemy 2.0 数据库基础设施
+- 客户、订单和工单 ORM 关系模型
+- PostgreSQL 种子数据和关联查询
+- 22 个 pytest 自动化测试
 - Ruff 代码质量检查
 
 ## 项目亮点
 
-1. 使用 `dataclass` 和 `Enum` 建立清晰的数据模型。
-2. 通过自定义异常统一处理不合法输入。
-3. 将业务规则和 JSON 配置分离，修改配置无需修改核心代码。
+1. 使用 `dataclass`、`Enum` 和 Pydantic 建立不同层次的数据模型。
+2. 通过自定义异常和 Pydantic 校验统一处理不合法输入。
+3. 将业务规则迁移到 JSON，修改规则无需改动核心代码。
 4. 使用日志记录配置加载、规则命中和数据库操作。
-5. 使用 SQLite 实现工单数据持久化。
+5. 使用 SQLite 支撑第一阶段 CLI 工单闭环。
 6. 使用参数化 SQL，避免直接拼接用户输入。
-7. 使用 CLI 串联录入、判断、保存和查询流程。
-8. 在写入数据库前检查重复工单。
-9. 使用 pytest fixture、parametrize 和 MonkeyPatch 建立 20 个自动化测试。
-10. 使用 Ruff 保持代码规范，并在代码清理后执行回归测试。
+7. 使用 FastAPI 和 Swagger UI 提供可调用的 HTTP 接口。
+8. 将后端拆分为 API、Schema、Service、Repository 和 Core 层。
+9. 使用 `pydantic-settings` 和 `.env` 隔离环境配置与敏感信息。
+10. 使用 Docker Compose 提供可复现的 PostgreSQL 17 开发环境。
+11. 使用 SQLAlchemy 2.0 建立客户、订单和工单关系模型。
+12. 使用外键约束保证客户、订单和工单之间的引用关系。
+13. 使用幂等种子脚本避免重复插入演示数据。
+14. 使用 `selectinload()` 和 `joinedload()` 验证 ORM 关联加载。
+15. 使用 pytest fixture、parametrize 和 MonkeyPatch 建立 22 个自动化测试。
+16. 使用 Ruff 和完整回归测试保证重构后的代码质量。
 
 ## 后续计划
 
-- 完善 FastAPI 工单创建、查询和持久化接口
+- 实现 PostgreSQL 工单创建、查询和更新 CRUD
+- 为工单列表增加分页和状态筛选
+- 实现客户与订单查询接口
+- 将 FastAPI Service 和 Repository 正式连接到 SQLAlchemy
+- 增加数据库事务与 API 自动化测试
 - 接入大模型进行工单分类和回复生成
-- 增加测试覆盖率统计和数据库测试
-- 增加用户认证和权限控制
-- 完成项目部署
+- 增加用户认证、权限控制和部署配置
 

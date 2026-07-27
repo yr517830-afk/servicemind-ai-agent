@@ -1941,3 +1941,611 @@ Day 9 将 ServiceMind 从功能集中在少量文件中的项目，改造成了�
 - [x] 全项目 20 个测试通过
 - [x] Ruff 全项目检查通过
 - [x] README 已全面更新
+
+---
+
+# Day 10：PostgreSQL 与 SQLAlchemy ORM
+
+日期：2026-07-27
+
+## 今日目标
+
+1. 安装并配置 Docker Desktop。
+2. 使用 Docker Compose 启动 PostgreSQL。
+3. 使用环境变量管理数据库连接配置。
+4. 使用 SQLAlchemy 2.0 建立 ORM 基础设施。
+5. 创建客户、订单和工单三张关系表。
+6. 使用 ORM 插入和查询关联数据。
+7. 为 ORM 表结构和外键关系增加自动化测试。
+
+## 今日完成内容
+
+### 1. 配置 WSL 2 与 Docker Desktop
+
+检查 WSL：
+
+```powershell
+wsl --version
+```
+
+实际环境：
+
+```text
+WSL 2.7.11.0
+Linux 内核 6.18.33.2
+```
+
+安装 Docker Desktop 时选择了：
+
+```text
+Per-user installation
+WSL 2 backend
+Linux containers
+```
+
+安装完成后验证：
+
+```powershell
+docker version
+docker compose version
+```
+
+实际版本：
+
+```text
+Docker Engine 29.6.2
+Docker Desktop 4.83.0
+Docker Compose 5.3.1
+```
+
+### 2. 解决 Docker 虚拟化启动问题
+
+Docker Desktop 首次启动时提示：
+
+```text
+Virtualization support not detected
+```
+
+任务管理器显示硬件虚拟化已经启用，因此问题不是 BIOS，而是 Windows 虚拟机平台未完全启用。
+
+使用管理员 PowerShell 启用：
+
+```powershell
+dism.exe /online /enable-feature /featurename:VirtualMachinePlatform /all /norestart
+dism.exe /online /enable-feature /featurename:Microsoft-Windows-Subsystem-Linux /all /norestart
+bcdedit /set hypervisorlaunchtype auto
+```
+
+重启 Windows 后，Docker Engine 成功启动。
+
+### 3. 处理 WSLg 远程桌面弹窗
+
+重启后出现与以下组件有关的错误：
+
+```text
+rdclientax.dll
+RemoteApp
+```
+
+检查发现该文件位于：
+
+```text
+C:\Program Files\WSL
+```
+
+说明弹窗来自 WSLg 的 Linux 图形应用支持，不是未知第三方软件。
+
+Day 10 只需要 Docker 和无图形界面的 WSL 2，因此在用户目录的 `.wslconfig` 中设置：
+
+```ini
+[wsl2]
+guiApplications=false
+```
+
+然后执行：
+
+```powershell
+wsl --shutdown
+```
+
+重新启动 Docker 后，Docker 仍能正常运行，WSLg 弹窗不再影响开发。
+
+### 4. 添加 PostgreSQL 环境变量
+
+在本地 `.env` 中增加：
+
+```dotenv
+POSTGRES_DB=servicemind
+POSTGRES_USER=servicemind
+POSTGRES_PASSWORD=本机开发密码
+DATABASE_URL=postgresql+psycopg://servicemind:本机开发密码@localhost:5432/servicemind
+```
+
+在 `.env.example` 中只保存安全示例：
+
+```dotenv
+POSTGRES_DB=servicemind
+POSTGRES_USER=servicemind
+POSTGRES_PASSWORD=change_me
+DATABASE_URL=postgresql+psycopg://servicemind:change_me@localhost:5432/servicemind
+```
+
+通过以下命令确认真实 `.env` 不会进入 Git：
+
+```powershell
+git check-ignore .env
+```
+
+### 5. 使用 Docker Compose 启动 PostgreSQL
+
+创建：
+
+```text
+compose.yaml
+```
+
+使用：
+
+```text
+postgres:17-alpine
+```
+
+并配置：
+
+- 数据库名称
+- 数据库用户
+- 数据库密码
+- `5432` 端口映射
+- PostgreSQL 命名卷
+- `pg_isready` 健康检查
+
+启动：
+
+```powershell
+docker compose up -d postgres
+```
+
+检查：
+
+```powershell
+docker compose ps
+```
+
+结果：
+
+```text
+servicemind-postgres
+postgres:17-alpine
+Up (healthy)
+0.0.0.0:5432->5432/tcp
+```
+
+命名卷用于保存 PostgreSQL 数据。执行普通的：
+
+```powershell
+docker compose down
+```
+
+不会删除数据库数据。
+
+### 6. 验证 PostgreSQL 连接
+
+在容器中执行：
+
+```powershell
+docker compose exec postgres psql `
+  -U servicemind `
+  -d servicemind `
+  -c "SELECT current_database(), current_user, version();"
+```
+
+结果确认：
+
+```text
+数据库：servicemind
+用户：servicemind
+PostgreSQL：17.10
+```
+
+建表前执行：
+
+```powershell
+docker compose exec postgres psql `
+  -U servicemind `
+  -d servicemind `
+  -c "\dt"
+```
+
+结果为：
+
+```text
+Did not find any relations.
+```
+
+说明数据库连接正常，但当时还没有创建实体表。
+
+### 7. 安装 ORM 与数据库驱动
+
+安装：
+
+```powershell
+python -m pip install "SQLAlchemy>=2.0,<2.1" "psycopg[binary]>=3.2,<4"
+```
+
+实际版本：
+
+```text
+SQLAlchemy 2.0.51
+psycopg 3.3.4
+psycopg-binary 3.3.4
+```
+
+在 `requirements.txt` 中记录：
+
+```text
+SQLAlchemy==2.0.51
+psycopg[binary]==3.3.4
+```
+
+执行：
+
+```powershell
+python -m pip check
+```
+
+结果：
+
+```text
+No broken requirements found.
+```
+
+### 8. 扩展统一配置系统
+
+在 `Settings` 中保留原有 SQLite 配置：
+
+```python
+database_path: str = "data/servicemind.db"
+```
+
+并增加：
+
+```python
+database_url: str = "sqlite:///data/servicemind.db"
+```
+
+默认值使用 SQLite，使不读取 `.env` 的单元测试能够独立运行。
+
+正常开发时，`.env` 中的 `DATABASE_URL` 会覆盖默认值，并连接 PostgreSQL。
+
+验证结果：
+
+```text
+postgresql+psycopg localhost 5432 servicemind servicemind
+```
+
+验证过程没有打印包含密码的完整连接 URL。
+
+### 9. 创建 SQLAlchemy 基础设施
+
+创建：
+
+```text
+app/core/database.py
+```
+
+其中包含：
+
+```text
+Base
+engine
+SessionLocal
+get_db()
+```
+
+各组件职责：
+
+- `Base`：所有 ORM 模型的共同基类。
+- `engine`：管理数据库连接与连接池。
+- `SessionLocal`：创建数据库会话。
+- `get_db()`：为 FastAPI 请求提供会话并自动关闭。
+- `pool_pre_ping=True`：使用连接前验证连接是否有效。
+
+使用 SQLAlchemy 执行：
+
+```sql
+SELECT 1
+```
+
+结果：
+
+```text
+Database result: 1
+```
+
+证明 Python、psycopg、SQLAlchemy 和 PostgreSQL 已经形成完整连接链路。
+
+### 10. 创建三个 ORM 实体
+
+创建：
+
+```text
+app/models/
+├── __init__.py
+└── entities.py
+```
+
+定义三个模型：
+
+```text
+Customer
+Order
+Ticket
+```
+
+主要关系：
+
+```text
+Customer 1 ─── N Order
+Customer 1 ─── N Ticket
+Order    1 ─── N Ticket
+```
+
+外键：
+
+```text
+orders.customer_id  → customers.id
+tickets.customer_id → customers.id
+tickets.order_id    → orders.id
+```
+
+订单金额使用：
+
+```python
+Numeric(12, 2)
+Decimal("299.00")
+```
+
+避免使用浮点数保存金额产生精度误差。
+
+### 11. 创建 PostgreSQL 数据表
+
+加载 ORM 模型并执行：
+
+```python
+Base.metadata.create_all(bind=engine)
+```
+
+最终创建：
+
+```text
+customers
+orders
+tickets
+```
+
+外键查询确认三条关系全部正确。
+
+`create_all()` 适合当前学习阶段和首次建表，但它不会管理已有表的字段变更。后续项目需要使用 Alembic 管理数据库迁移。
+
+### 12. 编写幂等种子脚本
+
+创建：
+
+```text
+scripts/seed_database.py
+```
+
+插入：
+
+- 一名 VIP 客户
+- 一张物流订单
+- 一张物流咨询工单
+
+第一次运行：
+
+```text
+Seed data created
+```
+
+第二次运行：
+
+```text
+Seed data already exists
+```
+
+脚本会先通过客户邮箱检查数据是否存在，因此重复运行不会重复插入同一组演示数据。
+
+### 13. 查询三个关联实体
+
+创建：
+
+```text
+scripts/query_database.py
+```
+
+查询结果：
+
+```text
+Customer: 1 小王 VIP orders=1 tickets=1
+Order: 1 SM-20260727-001 299.00 customer=小王
+Ticket: 1 物流 P2 customer=小王 order=SM-20260727-001
+```
+
+使用：
+
+```python
+selectinload()
+```
+
+加载一对多集合关系，并使用：
+
+```python
+joinedload()
+```
+
+加载订单或工单关联的单个实体。
+
+这证明三个实体不仅能分别查询，也能通过 ORM 关系互相访问。
+
+### 14. 添加 ORM 自动化测试
+
+新增：
+
+```text
+tests/test_models.py
+```
+
+包含两个测试：
+
+1. 验证 `customers`、`orders` 和 `tickets` 已注册到 metadata。
+2. 验证订单和工单的三个外键关系。
+
+这些测试只检查 SQLAlchemy metadata，不依赖正在运行的 PostgreSQL，因此适合本地测试和未来 CI。
+
+配置测试也增加了：
+
+- 默认 `database_url` 验证
+- 环境变量覆盖 `database_url` 验证
+
+### 15. 完成全项目验收
+
+执行：
+
+```powershell
+python -m pytest -q
+ruff check .
+python -m pip check
+docker compose ps
+python -m scripts.query_database
+```
+
+最终结果：
+
+```text
+22 passed
+All checks passed!
+No broken requirements found.
+PostgreSQL healthy
+三个 ORM 实体查询成功
+```
+
+## 今日遇到的问题
+
+### 问题一：PyCharm 终端找不到 Docker
+
+安装 Docker 后，原有 PyCharm 终端仍提示：
+
+```text
+docker is not recognized
+```
+
+原因是终端在安装前已经启动，仍然保留旧的 `PATH`。
+
+关闭并重新打开 PyCharm 后，新终端成功读取 Docker 路径。
+
+### 问题二：Docker 检测不到虚拟化
+
+虽然 BIOS 硬件虚拟化已经启用，但 Windows 虚拟机平台和 Hypervisor 没有完整启动。
+
+启用相关 Windows 功能并重启后解决。
+
+### 问题三：WSLg 出现 RemoteApp 弹窗
+
+`rdclientax.dll` 属于 WSLg 图形远程组件。
+
+当前项目不需要 Linux GUI，因此关闭 `guiApplications`，同时保留 WSL 2 和 Docker 功能。
+
+### 问题四：找不到 `app.models.entities`
+
+运行模型注册验证时出现：
+
+```text
+ModuleNotFoundError: No module named 'app.models.entities'
+```
+
+原因是已经创建 `app/models/__init__.py`，但遗漏了真正的：
+
+```text
+app/models/entities.py
+```
+
+补建文件并保存三个 ORM 模型后解决。
+
+### 问题五：Git 显示 `AM`
+
+例如：
+
+```text
+AM compose.yaml
+```
+
+表示文件已经暂存，但暂存后又被修改。
+
+这不是代码错误，最终提交前重新执行 `git add` 即可让暂存区包含最新版本。
+
+## 今日收获
+
+1. 理解镜像、容器、端口和命名卷之间的区别。
+2. 学会使用 Docker Compose 管理 PostgreSQL。
+3. 学会使用健康检查判断数据库是否真正可用。
+4. 学会使用 SQLAlchemy 2.0 声明式 ORM。
+5. 理解 `Base`、`engine`、`Session` 和事务的职责。
+6. 学会使用外键表达实体之间的关系。
+7. 学会使用 `Numeric` 与 `Decimal` 保存金额。
+8. 学会使用环境变量隔离数据库凭据。
+9. 学会编写可重复运行的种子数据脚本。
+10. 学会查询 ORM 实体及其关联关系。
+11. 理解 metadata 测试不需要连接真实数据库。
+12. 理解 `create_all()` 与数据库迁移工具的区别。
+13. 学会在引入新数据库后执行完整回归测试。
+
+## 对求职的帮助
+
+Day 10 将 ServiceMind 从 SQLite 单机练习项目升级为具备 PostgreSQL 和 ORM 基础设施的后端项目。
+
+能够体现：
+
+- Docker Desktop 与 Docker Compose 使用能力
+- PostgreSQL 数据库使用能力
+- SQLAlchemy 2.0 ORM 建模能力
+- 关系型数据库设计能力
+- 外键和实体关系理解
+- 数据库连接池与 Session 管理意识
+- 环境变量和敏感配置管理意识
+- 种子数据与幂等设计意识
+- 自动化测试与回归验证能力
+- 数据库问题排查能力
+
+## 面试表达
+
+我使用 Docker Compose 为 ServiceMind 搭建了 PostgreSQL 17 开发环境，并通过健康检查和命名卷保证数据库的可用性与数据持久化。后端使用 SQLAlchemy 2.0 和 psycopg 建立统一的 Engine 与 Session，设计了 Customer、Order 和 Ticket 三个 ORM 实体以及三条外键关系。我还编写了幂等种子脚本和关联查询脚本，并使用 metadata 测试验证表结构和外键。最终全项目 22 个 pytest 测试、Ruff 和依赖检查全部通过。
+
+## 当前边界
+
+Day 10 已经完成 PostgreSQL 建表、数据插入和 ORM 查询，但 FastAPI 的 `POST /tickets` 仍然返回临时响应，尚未真正写入 PostgreSQL。
+
+Day 11 将完成：
+
+- 工单创建
+- 工单查询
+- 工单更新
+- 分页和筛选
+- FastAPI Service、Repository 与 SQLAlchemy 的正式连接
+
+## Day 10 完成情况
+
+- [x] WSL 2 与 Docker Desktop 正常运行
+- [x] PostgreSQL 17 容器健康
+- [x] PostgreSQL 数据使用命名卷持久化
+- [x] 数据库凭据通过 `.env` 管理
+- [x] 安装 SQLAlchemy 和 psycopg
+- [x] 创建 `Base`、`engine` 和 `SessionLocal`
+- [x] 创建客户、订单和工单 ORM 模型
+- [x] 创建三张 PostgreSQL 数据表
+- [x] 验证三条外键关系
+- [x] 编写幂等种子脚本
+- [x] 查询三个实体及其关联数据
+- [x] 新增 2 个 ORM metadata 测试
+- [x] 全项目 22 个测试通过
+- [x] Ruff 全项目检查通过
+- [x] README 已全面更新
