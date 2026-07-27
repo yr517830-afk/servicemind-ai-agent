@@ -1401,3 +1401,543 @@ Day 8让ServiceMind从命令行项目升级为具有HTTP接口的后端应用。
 - [x] 全项目18个测试通过
 - [x] Ruff检查通过
 - [x] README已更新
+
+---
+
+# Day 9：分层结构与环境配置
+
+## 今日目标
+
+1. 将 FastAPI 项目改造成清晰的分层结构。
+2. 使用 `pydantic-settings` 统一管理环境配置。
+3. 使用 `.env.example` 提供安全的配置模板。
+4. 将路由、模型、业务服务和数据库访问分离。
+5. 保证重构前后的接口功能保持一致。
+6. 为配置系统增加自动化测试。
+
+## 今日完成内容
+
+### 1. 安装配置管理依赖
+
+安装：
+
+```powershell
+python -m pip install pydantic-settings
+```
+
+确认版本：
+
+```powershell
+python -m pip show pydantic-settings
+```
+
+当前版本：
+
+```text
+pydantic-settings 2.14.2
+```
+
+同时在 `requirements.txt` 中增加：
+
+```text
+pydantic-settings==2.14.2
+```
+
+`pydantic-settings` 可以通过 Pydantic 模型读取环境变量和 `.env` 文件，避免把数据库地址、调试开关和密钥直接写死在代码中。
+
+### 2. 建立 FastAPI 分层目录
+
+在 `app` 中建立：
+
+```text
+app/
+├── api/
+│   └── routes/
+├── core/
+├── repositories/
+├── schemas/
+└── services/
+```
+
+各层职责：
+
+- `api/routes`：接收 HTTP 请求并返回响应。
+- `schemas`：定义请求和响应的数据格式。
+- `services`：负责业务流程和业务逻辑。
+- `repositories`：负责数据库访问。
+- `core`：负责配置等全局基础设施。
+
+分层后的目标调用方向：
+
+```text
+HTTP 请求
+    ↓
+API 路由层
+    ↓
+Service 业务层
+    ↓
+Repository 数据访问层
+    ↓
+SQLite 数据库
+```
+
+### 3. 创建统一配置类
+
+创建：
+
+```text
+app/core/config.py
+```
+
+核心代码：
+
+```python
+from functools import lru_cache
+
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class Settings(BaseSettings):
+    app_name: str = "ServiceMind AI Agent"
+    app_version: str = "0.1.0"
+    debug: bool = False
+    database_path: str = "data/servicemind.db"
+    routing_rules_path: str = "config/routing_rules.json"
+
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
+
+
+@lru_cache
+def get_settings() -> Settings:
+    return Settings()
+
+
+settings = get_settings()
+```
+
+主要作用：
+
+- `BaseSettings`：读取环境变量和 `.env`。
+- `SettingsConfigDict`：指定环境配置文件的位置和编码。
+- `extra="ignore"`：忽略配置文件中暂时未定义的字段。
+- `@lru_cache`：避免重复创建配置对象。
+- `settings`：供项目其他模块直接读取统一配置。
+
+### 4. 创建环境配置文件
+
+项目根目录新增：
+
+```text
+.env
+.env.example
+```
+
+配置内容：
+
+```dotenv
+APP_NAME=ServiceMind AI Agent
+APP_VERSION=0.1.0
+DEBUG=false
+DATABASE_PATH=data/servicemind.db
+ROUTING_RULES_PATH=config/routing_rules.json
+```
+
+两者区别：
+
+- `.env`：本机实际配置，可能包含密码和密钥，不能上传 GitHub。
+- `.env.example`：公开配置模板，可以上传 GitHub，不能包含真实密钥。
+
+在 `.gitignore` 中加入：
+
+```gitignore
+.env
+```
+
+使用下面的命令确认 `.env` 已被忽略：
+
+```powershell
+git check-ignore .env
+```
+
+结果：
+
+```text
+.env
+```
+
+### 5. 将 Schema 迁移到独立目录
+
+原来的：
+
+```text
+app/schemas.py
+```
+
+迁移为：
+
+```text
+app/schemas/tickets.py
+```
+
+文件中保留：
+
+```text
+TicketCreate
+TicketResponse
+```
+
+Schema 层只负责描述输入和输出数据，不负责处理 HTTP 请求，也不直接访问数据库。
+
+迁移后运行 API 测试，原有 3 个测试仍然通过，说明重构没有改变接口行为。
+
+### 6. 拆分健康检查路由
+
+创建：
+
+```text
+app/api/routes/health.py
+```
+
+核心代码：
+
+```python
+from fastapi import APIRouter
+
+
+router = APIRouter(tags=["health"])
+
+
+@router.get("/health")
+def health_check() -> dict[str, str]:
+    return {
+        "status": "ok",
+        "service": "ServiceMind",
+    }
+```
+
+`main.py` 通过 `include_router()` 注册该路由，不再直接定义健康检查函数。
+
+### 7. 拆分工单路由
+
+创建：
+
+```text
+app/api/routes/tickets.py
+```
+
+路由配置：
+
+```python
+router = APIRouter(
+    prefix="/tickets",
+    tags=["工单"],
+)
+```
+
+接口使用：
+
+```python
+@router.post(
+    "",
+    response_model=TicketResponse,
+    status_code=201,
+)
+```
+
+`prefix="/tickets"` 与空路径 `""` 组合后，最终接口仍然是：
+
+```text
+POST /tickets
+```
+
+路由函数只负责接收请求、调用 Service 并返回结果。
+
+### 8. 创建 Service 业务服务层
+
+创建：
+
+```text
+app/services/ticket_service.py
+```
+
+核心代码：
+
+```python
+def process_ticket(ticket: TicketCreate) -> TicketResponse:
+    return TicketResponse(
+        ticket_id=1,
+        status="received",
+        **ticket.model_dump(),
+    )
+```
+
+工单响应的创建逻辑从路由文件迁移到 Service 层。
+
+当前 `ticket_id=1` 仍然是学习阶段的临时返回值。Repository 数据库封装已经建立，后续会继续将 FastAPI 工单接口与规则引擎和 SQLite 持久化流程连接起来。
+
+### 9. 创建 Repository 数据访问层
+
+创建：
+
+```text
+app/repositories/ticket_repository.py
+```
+
+Repository 对已有的 `ticket_core.repository` 进行封装，提供：
+
+```text
+save()
+list_recent()
+```
+
+数据库路径不再直接写在 Repository 中，而是读取：
+
+```python
+settings.database_path
+```
+
+这一层的价值是让 Service 不需要知道 SQLite 文件地址，也不需要直接操作 SQL。
+
+### 10. 让 FastAPI 使用统一配置
+
+`app/main.py` 改为从配置对象读取：
+
+```python
+app = FastAPI(
+    title=settings.app_name,
+    description="智能工单系统 HTTP API",
+    version=settings.app_version,
+    debug=settings.debug,
+)
+```
+
+配置来源变为：
+
+```text
+.env
+  ↓
+app/core/config.py
+  ↓
+app/main.py
+```
+
+验证结果：
+
+```text
+ServiceMind AI Agent
+0.1.0
+False
+```
+
+### 11. 新增配置自动化测试
+
+新增：
+
+```text
+tests/test_config.py
+```
+
+包含两个测试：
+
+1. 未设置环境变量时使用默认配置。
+2. 环境变量能够覆盖默认配置。
+
+测试中使用：
+
+```python
+Settings(_env_file=None)
+```
+
+避免本机 `.env` 干扰测试。
+
+使用 `MonkeyPatch` 临时设置环境变量：
+
+```python
+monkeypatch.setenv("APP_NAME", "ServiceMind Test API")
+monkeypatch.setenv("APP_VERSION", "9.9.9")
+monkeypatch.setenv("DEBUG", "true")
+```
+
+测试结果：
+
+```text
+2 passed
+```
+
+### 12. 完成全项目验收
+
+运行：
+
+```powershell
+python -m pytest -q
+```
+
+结果：
+
+```text
+20 passed
+```
+
+运行：
+
+```powershell
+ruff check .
+```
+
+结果：
+
+```text
+All checks passed!
+```
+
+说明本次目录重构和配置改造没有破坏已有的 CLI、规则引擎、输入校验和 FastAPI 接口。
+
+## 今日遇到的问题
+
+### 问题一：文件和目录重名
+
+项目中原来存在：
+
+```text
+app/schemas.py
+```
+
+因此不能直接创建同名的 `app/schemas` 目录。
+
+解决方法：
+
+1. 将 `schemas.py` 临时重命名为 `schemas_old.py`。
+2. 创建 `schemas` Python 软件包。
+3. 将临时文件移动到该目录。
+4. 最终重命名为 `tickets.py`。
+5. 使用 PyCharm 重构功能自动更新引用。
+
+### 问题二：路由文件中仍然使用 `@app.post`
+
+工单接口移动到 `tickets.py` 后，第一次运行测试出现：
+
+```text
+NameError: name 'app' is not defined
+```
+
+原因是装饰器仍然写成：
+
+```python
+@app.post("/tickets")
+```
+
+但新路由文件中没有 FastAPI 应用对象 `app`，只有 `router`。
+
+修改为：
+
+```python
+@router.post("")
+```
+
+后解决。
+
+### 问题三：路由文件存在无用导入
+
+`tickets.py` 中曾错误保留：
+
+```python
+from fastapi import FastAPI
+from app.api.routes.health import router as health_router
+```
+
+这些内容只应由 `main.py` 使用。
+
+删除无用导入并运行：
+
+```powershell
+ruff check app/api/routes/tickets.py
+```
+
+结果：
+
+```text
+All checks passed!
+```
+
+### 问题四：路由标签重复
+
+最初在 `APIRouter` 和 `@router.post()` 中都设置了标签。
+
+最终统一将：
+
+```python
+tags=["工单"]
+```
+
+放在 `APIRouter` 中，使同一模块内的接口自动共享标签。
+
+### 问题五：README 代码框没有正确闭合
+
+更新 README 时，调用结构代码框与项目结构代码框发生嵌套，导致 Markdown 格式错误。
+
+通过关闭前一个代码框、恢复 `## 项目结构` 标题并删除多余的代码围栏后解决。
+
+这说明文档也需要像代码一样检查结构和最终显示效果。
+
+## 今日收获
+
+1. 理解 API、Schema、Service、Repository 和 Core 各层职责。
+2. 学会使用 `APIRouter` 拆分 FastAPI 路由。
+3. 学会使用 `include_router()` 注册路由模块。
+4. 学会让路由层只处理 HTTP 请求和响应。
+5. 学会把处理逻辑迁移到 Service 层。
+6. 学会使用 Repository 层封装数据库模块。
+7. 学会使用 `pydantic-settings` 管理环境配置。
+8. 理解 `.env` 与 `.env.example` 的区别。
+9. 学会避免将本地敏感配置上传 GitHub。
+10. 学会使用环境变量覆盖默认配置。
+11. 学会使用 `MonkeyPatch` 测试环境变量。
+12. 学会在重构后执行完整回归测试。
+13. 理解代码分层能够降低模块之间的耦合。
+
+## 对求职的帮助
+
+Day 9 将 ServiceMind 从功能集中在少量文件中的项目，改造成了具有清晰职责边界的后端项目结构。
+
+能够体现：
+
+- FastAPI 项目架构设计能力
+- 分层架构理解
+- 路由模块化能力
+- Pydantic Settings 配置管理能力
+- 环境变量和敏感配置管理意识
+- Service 与 Repository 分层意识
+- 模块重构能力
+- 自动化测试能力
+- 回归测试意识
+- GitHub 项目交付规范意识
+
+这种目录结构与企业后端项目更接近，后续增加数据库接口、大模型服务、用户认证或其他业务模块时，不需要把所有代码继续堆积在 `main.py` 中。
+
+## 面试表达
+
+我对 ServiceMind 的 FastAPI 部分进行了分层重构，将项目拆分为 API、Schema、Service、Repository 和 Core 五层。路由层只负责 HTTP 请求和响应，业务处理进入 Service，数据库访问通过 Repository 统一封装。同时使用 pydantic-settings 和 `.env` 管理应用名称、版本、调试开关及数据库路径，并提供不包含敏感信息的 `.env.example`。重构后新增了配置测试，最终全项目 20 个 pytest 测试和 Ruff 检查全部通过。
+
+## Day 9 完成情况
+
+- [x] 安装 `pydantic-settings`
+- [x] 更新 `requirements.txt`
+- [x] 创建 API、Schema、Service、Repository 和 Core 目录
+- [x] 创建统一配置类
+- [x] 创建 `.env`
+- [x] 创建 `.env.example`
+- [x] 确认 `.env` 不会上传 GitHub
+- [x] 迁移请求和响应模型
+- [x] 拆分健康检查路由
+- [x] 拆分工单路由
+- [x] 创建 Service 层
+- [x] 创建 Repository 层
+- [x] FastAPI 使用统一配置
+- [x] 新增 2 个配置测试
+- [x] 全项目 20 个测试通过
+- [x] Ruff 全项目检查通过
+- [x] README 已全面更新

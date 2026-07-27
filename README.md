@@ -94,42 +94,94 @@ ServiceMind 是一个使用 Python 开发的智能客服工单系统。
 - 全项目18个pytest测试通过
 - Ruff全项目检查通过
 
+### Day 9：分层结构与环境配置
+
+- 使用 `pydantic-settings` 建立统一配置系统
+- 使用 `.env` 保存本地环境配置
+- 提供 `.env.example` 作为安全的配置模板
+- 将 `.env` 加入 `.gitignore`，避免敏感配置上传
+- 将 FastAPI 项目拆分为 API、Schema、Service、Repository 和 Core 层
+- 将健康检查和工单接口迁移到独立路由模块
+- 将请求和响应模型迁移到 Schema 层
+- 将工单处理逻辑迁移到 Service 层
+- 使用 Repository 层统一封装数据库访问
+- FastAPI 应用名称、版本和调试状态由环境配置提供
+- 新增 2 个配置自动化测试
+- 全项目 20 个 pytest 测试通过
+- Ruff 全项目检查通过
+
+当前调用结构：
+
+```text
+HTTP 请求
+    ↓
+API 路由层
+    ↓
+Service 业务层
+    ↓
+Repository 数据访问层
+    ↓
+SQLite 数据库
+```
+
 ## 项目结构
 
 ```text
+
 servicemind-ai-agent/
+├── app/
+│   ├── api/
+│   │   ├── __init__.py
+│   │   └── routes/
+│   │       ├── __init__.py
+│   │       ├── health.py
+│   │       └── tickets.py
+│   ├── core/
+│   │   ├── __init__.py
+│   │   └── config.py
+│   ├── repositories/
+│   │   ├── __init__.py
+│   │   └── ticket_repository.py
+│   ├── schemas/
+│   │   ├── __init__.py
+│   │   └── tickets.py
+│   ├── services/
+│   │   ├── __init__.py
+│   │   └── ticket_service.py
+│   ├── __init__.py
+│   └── main.py
 ├── config/
 │   └── routing_rules.json
-├── app/
-│   ├── __init__.py
-│   ├── main.py
-│   └── schemas.py
 ├── tests/
 │   ├── conftest.py
+│   ├── test_api.py
+│   ├── test_config.py
 │   ├── test_rules.py
 │   └── test_validators.py
-│   ├── test_api.py
 ├── ticket_core/
 │   ├── __init__.py
-│   ├── models.py
-│   ├── exceptions.py
-│   ├── validators.py
-│   ├── rules.py
 │   ├── config_loader.py
+│   ├── exceptions.py
 │   ├── logging_config.py
-│   └── repository.py
+│   ├── models.py
+│   ├── repository.py
+│   ├── rules.py
+│   └── validators.py
 ├── data/
 │   └── servicemind.db
 ├── logs/
 │   └── servicemind.log
+├── .env.example
+├── .gitignore
 ├── day1_python_review.py
-├── ticket_cli.py
 ├── learning_log.md
 ├── README.md
-└── .gitignore
+├── requirements.txt
+└── ticket_cli.py
 ```
 
-> 数据库和日志属于本地运行文件，已经通过 `.gitignore` 排除，不会上传到 GitHub。
+>数据库、日志和 `.env` 属于本地运行文件，已经通过 `.gitignore` 排除，不会上传到 GitHub；仓库仅提供 `.env.example` 配置模板。
+
 
 ## 运行环境
 
@@ -185,7 +237,7 @@ ruff check .
 预期结果：
 
 ```text
-15 passed
+20 passed
 All checks passed!
 ```
 
@@ -244,7 +296,7 @@ python -m pytest -q
 当前测试结果：
 
 ```text
-18 passed
+20 passed
 ```
 
 ### 单独运行输入校验测试
@@ -306,6 +358,11 @@ ruff check .
 - 合法工单创建返回201
 - 非法工单请求返回422
 
+### 配置系统：2个测试
+
+- 验证未设置环境变量时使用默认配置
+- 验证环境变量能够覆盖默认配置
+
 ## 已实现的核心功能
 
 - 工单和客户数据模型
@@ -333,12 +390,12 @@ ruff check .
 6. 使用参数化 SQL，避免直接拼接用户输入。
 7. 使用 CLI 串联录入、判断、保存和查询流程。
 8. 在写入数据库前检查重复工单。
-9. 使用 pytest fixture 和 parametrize 建立 15 个自动化测试。
+9. 使用 pytest fixture、parametrize 和 MonkeyPatch 建立 20 个自动化测试。
 10. 使用 Ruff 保持代码规范，并在代码清理后执行回归测试。
 
 ## 后续计划
 
-- 使用 FastAPI 提供 HTTP 接口
+- 完善 FastAPI 工单创建、查询和持久化接口
 - 接入大模型进行工单分类和回复生成
 - 增加测试覆盖率统计和数据库测试
 - 增加用户认证和权限控制
