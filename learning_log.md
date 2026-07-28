@@ -3098,3 +3098,537 @@ Day 11 已完成工单 API 的创建、查询、更新、分页和筛选，但�
 - [x] Ruff 全项目检查通过
 - [x] Python 依赖检查通过
 - [x] README 已全面更新
+
+---
+
+# Day 12：客户、订单工具接口与统一 404
+
+日期：2026-07-28
+
+## 今日目标
+
+1. 实现 `GET /customers/{customer_id}`。
+2. 实现 `GET /orders/{order_id}`。
+3. 为不存在的客户、订单和工单提供统一 404。
+4. 为正常响应和错误响应补充字段说明。
+5. 使用 Swagger 和自动化测试完成验收。
+
+## 今日完成内容
+
+### 1. 验证 Day 11 基线
+
+执行：
+
+```powershell
+git status --short
+docker compose ps
+python -m pytest -q
+ruff check .
+```
+
+结果：
+
+```text
+Git 工作区干净
+PostgreSQL healthy
+29 passed
+All checks passed!
+```
+
+### 2. 设计统一资源异常
+
+创建：
+
+```text
+app/core/exceptions.py
+```
+
+定义统一基类：
+
+```text
+ResourceNotFoundError
+```
+
+并定义三个具体异常：
+
+```text
+CustomerNotFoundError
+OrderNotFoundError
+TicketNotFoundError
+```
+
+每个异常都包含：
+
+```text
+code
+resource
+resource_id
+message
+```
+
+错误码示例：
+
+```text
+CUSTOMER_NOT_FOUND
+ORDER_NOT_FOUND
+TICKET_NOT_FOUND
+```
+
+稳定错误码便于前端和其他调用方根据错误类型执行不同逻辑，不需要解析中文消息。
+
+### 3. 设计统一错误响应
+
+创建：
+
+```text
+app/schemas/errors.py
+```
+
+定义：
+
+```text
+ErrorDetail
+ErrorResponse
+```
+
+统一格式：
+
+```json
+{
+  "error": {
+    "code": "CUSTOMER_NOT_FOUND",
+    "message": "客户 999 不存在。",
+    "resource": "customer",
+    "resource_id": 999
+  }
+}
+```
+
+字段职责：
+
+- `code`：稳定的机器可读错误码。
+- `message`：供用户或开发者阅读的说明。
+- `resource`：资源类型。
+- `resource_id`：未找到的资源编号。
+
+### 4. 注册全局异常处理器
+
+创建：
+
+```text
+app/core/exception_handlers.py
+```
+
+使用：
+
+```python
+app.add_exception_handler()
+```
+
+注册 `ResourceNotFoundError`。
+
+任何未被路由捕获的具体资源异常都会统一转换为：
+
+```text
+HTTP 404
+ErrorResponse JSON
+```
+
+这样无需在每个路由中重复编写相同的 `try/except` 和 `HTTPException`。
+
+### 5. 工单接口切换到统一异常
+
+Day 11 的 `ticket_service.py` 在文件内部定义了三个资源异常，路由层逐个捕获并转换为 404。
+
+Day 12 改为：
+
+- Service 从 `app.core.exceptions` 导入统一异常。
+- Service 只抛出具体资源异常。
+- 路由不再捕获资源异常。
+- 全局处理器统一生成响应。
+- `InvalidTicketError` 仍由路由转换为 HTTP 400。
+
+验证：
+
+```text
+GET /tickets/999
+```
+
+返回：
+
+```json
+{
+  "error": {
+    "code": "TICKET_NOT_FOUND",
+    "message": "工单 999 不存在。",
+    "resource": "ticket",
+    "resource_id": 999
+  }
+}
+```
+
+### 6. 客户响应 Schema
+
+创建：
+
+```text
+app/schemas/customers.py
+```
+
+`CustomerResponse` 包含：
+
+```text
+customer_id
+name
+email
+level
+is_vip
+created_at
+```
+
+使用：
+
+```python
+ConfigDict(from_attributes=True)
+```
+
+从 ORM Customer 对象生成响应。
+
+每个字段都使用 Pydantic `Field` 提供：
+
+- 类型约束。
+- 字段说明。
+- 示例值。
+
+### 7. 订单响应 Schema
+
+创建：
+
+```text
+app/schemas/orders.py
+```
+
+`OrderResponse` 包含：
+
+```text
+order_id
+order_number
+customer_id
+status
+total_amount
+created_at
+```
+
+金额保持：
+
+```text
+Decimal
+```
+
+API JSON 中显示为：
+
+```text
+"299.00"
+```
+
+避免金额精度丢失。
+
+### 8. 客户与订单 Repository
+
+创建：
+
+```text
+app/repositories/customer_repository.py
+app/repositories/order_repository.py
+```
+
+提供：
+
+```text
+get_customer_by_id()
+get_order_by_id()
+get_order_for_customer()
+```
+
+随后清理 `ticket_repository.py` 中重复的客户和订单查询，让：
+
+- Customer Repository 只负责客户。
+- Order Repository 只负责订单。
+- Ticket Repository 只负责工单。
+
+Ticket Service 复用 Customer 和 Order Repository，避免重复实现。
+
+### 9. 客户与订单 Service
+
+创建：
+
+```text
+app/services/customer_service.py
+app/services/order_service.py
+```
+
+Service 查询 Repository，资源不存在时分别抛出：
+
+```text
+CustomerNotFoundError
+OrderNotFoundError
+```
+
+API 路由无需了解数据库查询细节。
+
+### 10. 客户与订单路由
+
+创建：
+
+```text
+app/api/routes/customers.py
+app/api/routes/orders.py
+```
+
+实现：
+
+```text
+GET /customers/{customer_id}
+GET /orders/{order_id}
+```
+
+路径参数使用：
+
+```python
+Path(ge=1)
+```
+
+并提供参数说明。
+
+接口 OpenAPI 中显式声明：
+
+```text
+404 → ErrorResponse
+```
+
+### 11. Swagger 正常查询验收
+
+执行：
+
+```text
+GET /customers/1
+```
+
+返回：
+
+```text
+HTTP 200
+customer_id: 1
+name: 小王
+email: xiaowang@example.com
+level: VIP
+is_vip: true
+```
+
+执行：
+
+```text
+GET /orders/1
+```
+
+返回：
+
+```text
+HTTP 200
+order_id: 1
+order_number: SM-20260727-001
+customer_id: 1
+status: shipped
+total_amount: 299.00
+```
+
+### 12. Swagger 统一 404 验收
+
+执行：
+
+```text
+GET /customers/999
+```
+
+返回：
+
+```text
+HTTP 404
+code: CUSTOMER_NOT_FOUND
+resource: customer
+resource_id: 999
+```
+
+执行：
+
+```text
+GET /orders/999
+```
+
+返回：
+
+```text
+HTTP 404
+code: ORDER_NOT_FOUND
+resource: order
+resource_id: 999
+```
+
+客户、订单和工单三种资源均使用相同错误结构。
+
+### 13. 自动化测试升级
+
+原有 Day 11 API 测试使用：
+
+```json
+{
+  "detail": "..."
+}
+```
+
+断言资源错误。
+
+Day 12 更新为断言完整统一响应，并新增：
+
+1. 查询客户详情。
+2. 查询订单详情。
+3. 客户不存在的统一 404。
+4. 订单不存在的统一 404。
+5. OpenAPI 字段说明和 404 描述。
+
+FastAPI API 测试从：
+
+```text
+10
+```
+
+增加到：
+
+```text
+15
+```
+
+执行：
+
+```powershell
+python -m pytest tests/test_api.py -v
+```
+
+结果：
+
+```text
+15 passed
+```
+
+### 14. 全项目验收
+
+执行：
+
+```powershell
+python -m pytest -q
+ruff check .
+python -m pip check
+docker compose ps
+```
+
+结果：
+
+```text
+34 passed
+All checks passed!
+No broken requirements found.
+PostgreSQL healthy
+```
+
+## 今日遇到的问题
+
+### 问题一：旧路由重复处理 404
+
+Day 11 每个路由都捕获具体异常并抛出 `HTTPException`，代码重复且响应格式只包含 `detail`。
+
+通过统一异常基类和全局处理器，将重复逻辑集中到一个位置。
+
+### 问题二：旧测试依赖 `detail`
+
+统一错误结构后，旧测试仍访问：
+
+```python
+response.json()["detail"]
+```
+
+更新为完整断言 `error.code`、`message`、`resource` 和 `resource_id`。
+
+### 问题三：Repository 职责重复
+
+Ticket Repository 中同时存在客户、订单和工单查询。
+
+Day 12 将客户与订单查询迁移到各自 Repository，Ticket Service 通过组合多个 Repository 完成业务流程。
+
+## 今日收获
+
+1. 学会设计机器可读的稳定错误码。
+2. 学会定义统一 API 错误响应。
+3. 学会使用 FastAPI 全局异常处理器。
+4. 理解 Service 抛业务异常、API 统一转换 HTTP 响应的分工。
+5. 学会在 OpenAPI 中声明错误响应模型。
+6. 学会使用 Pydantic Field 编写字段说明和示例。
+7. 学会创建客户与订单工具查询接口。
+8. 理解金额应使用 Decimal。
+9. 学会按资源拆分 Repository。
+10. 学会测试 Swagger/OpenAPI 文档结构。
+11. 学会在重构错误格式后更新回归测试。
+
+## 对求职的帮助
+
+Day 12 让项目不仅“接口能用”，还具备了更接近企业 API 的错误契约和接口文档。
+
+能够体现：
+
+- REST 资源接口设计能力
+- 全局异常处理能力
+- API 错误码设计意识
+- Pydantic 响应建模能力
+- OpenAPI 文档维护能力
+- Repository 职责划分能力
+- Service 异常语义设计能力
+- Swagger 手工验收能力
+- 自动化 API 契约测试能力
+
+## 面试表达
+
+我为 ServiceMind 新增了客户和订单详情查询接口，并设计了统一的资源不存在错误契约。Customer、Order 和 Ticket Service 都抛出同一基类下的资源异常，由 FastAPI 全局异常处理器统一转换为包含错误码、消息、资源类型和资源编号的 404 JSON。接口 Schema 使用 Pydantic Field 提供字段说明和示例，OpenAPI 中也显式声明 404 响应模型。测试层新增客户、订单和 OpenAPI 契约测试，最终 15 个 API 测试和全项目 34 个测试全部通过。
+
+## 当前边界
+
+Day 12 已完成客户和订单详情查询，但仍有以下边界：
+
+- 尚未提供客户和订单列表。
+- 尚未提供客户和订单创建、修改接口。
+- 尚未实现数据库迁移工具。
+- HTTP 400 和 422 尚未全部切换到同一错误外壳。
+- 尚未实现认证、权限和大模型功能。
+
+## Day 12 完成情况
+
+- [x] 创建统一资源异常基类
+- [x] 创建客户、订单和工单资源异常
+- [x] 创建统一错误响应 Schema
+- [x] 注册 FastAPI 全局 404 处理器
+- [x] 工单接口切换到统一 404
+- [x] 创建客户响应 Schema
+- [x] 创建订单响应 Schema
+- [x] 为响应字段增加说明和示例
+- [x] 创建 Customer Repository
+- [x] 创建 Order Repository
+- [x] Repository 职责完成去重
+- [x] 创建 Customer Service
+- [x] 创建 Order Service
+- [x] 实现 `GET /customers/{customer_id}`
+- [x] 实现 `GET /orders/{order_id}`
+- [x] Swagger 正常查询通过
+- [x] Swagger 统一 404 验收通过
+- [x] 15 个 API 自动化测试通过
+- [x] 全项目 34 个测试通过
+- [x] Ruff 全项目检查通过
+- [x] Python 依赖检查通过
+- [x] README 已全面更新

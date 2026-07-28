@@ -1,10 +1,12 @@
 from fastapi import FastAPI
 
+from app.api.routes.customers import router as customers_router
 from app.api.routes.health import router as health_router
-
+from app.api.routes.orders import router as orders_router
 from app.api.routes.tickets import router as tickets_router
-
 from app.core.config import settings
+from app.core.exception_handlers import register_exception_handlers
+
 
 app = FastAPI(
     title=settings.app_name,
@@ -13,6 +15,9 @@ app = FastAPI(
     debug=settings.debug,
 )
 
-app.include_router(health_router)
+register_exception_handlers(app)
 
+app.include_router(health_router)
+app.include_router(customers_router)
+app.include_router(orders_router)
 app.include_router(tickets_router)

@@ -1,29 +1,8 @@
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.models import Customer, Order, Ticket
+from app.models import Ticket
 from ticket_core.models import IssueType, Priority
-
-
-def get_customer_by_id(
-    session: Session,
-    customer_id: int,
-) -> Customer | None:
-    """按编号查询客户。"""
-    return session.get(Customer, customer_id)
-
-
-def get_order_for_customer(
-    session: Session,
-    order_id: int,
-    customer_id: int,
-) -> Order | None:
-    """查询属于指定客户的订单。"""
-    statement = select(Order).where(
-        Order.id == order_id,
-        Order.customer_id == customer_id,
-    )
-    return session.scalar(statement)
 
 
 def add_ticket(

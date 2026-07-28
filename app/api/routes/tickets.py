@@ -12,9 +12,6 @@ from app.schemas.tickets import (
     TicketUpdate,
 )
 from app.services.ticket_service import (
-    CustomerNotFoundError,
-    OrderNotFoundError,
-    TicketNotFoundError,
     create_ticket as create_ticket_service,
     get_ticket as get_ticket_service,
     get_ticket_page,
@@ -50,11 +47,6 @@ def create_ticket(
             session,
             payload,
         )
-    except (CustomerNotFoundError, OrderNotFoundError) as error:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=str(error),
-        ) from error
     except InvalidTicketError as error:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -115,16 +107,10 @@ def get_ticket(
     session: SessionDependency,
 ) -> TicketResponse:
     """按编号查询一张工单。"""
-    try:
-        ticket = get_ticket_service(
-            session,
-            ticket_id,
-        )
-    except TicketNotFoundError as error:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=str(error),
-        ) from error
+    ticket = get_ticket_service(
+        session,
+        ticket_id,
+    )
 
     return TicketResponse.model_validate(ticket)
 
@@ -145,11 +131,6 @@ def update_ticket(
             ticket_id,
             payload,
         )
-    except (TicketNotFoundError, CustomerNotFoundError) as error:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=str(error),
-        ) from error
     except InvalidTicketError as error:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

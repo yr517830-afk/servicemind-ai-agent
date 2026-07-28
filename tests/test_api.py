@@ -135,7 +135,14 @@ def test_create_ticket_returns_404_for_unknown_customer(
     )
 
     assert response.status_code == 404
-    assert "客户 999 不存在" in response.json()["detail"]
+    assert response.json() == {
+        "error": {
+            "code": "CUSTOMER_NOT_FOUND",
+            "message": "客户 999 不存在。",
+            "resource": "customer",
+            "resource_id": 999,
+        },
+    }
 
 
 def test_create_ticket_rejects_unrelated_order(
@@ -153,7 +160,14 @@ def test_create_ticket_rejects_unrelated_order(
     )
 
     assert response.status_code == 404
-    assert "订单 999 不存在" in response.json()["detail"]
+    assert response.json() == {
+        "error": {
+            "code": "ORDER_NOT_FOUND",
+            "message": "订单 999 不存在或不属于客户 1。",
+            "resource": "order",
+            "resource_id": 999,
+        },
+    }
 
 
 def test_invalid_ticket_returns_422(
@@ -197,6 +211,16 @@ def test_missing_ticket_returns_404(
 
     assert get_response.status_code == 404
     assert patch_response.status_code == 404
+    expected_error = {
+        "error": {
+            "code": "TICKET_NOT_FOUND",
+            "message": "工单 999 不存在。",
+            "resource": "ticket",
+            "resource_id": 999,
+        },
+    }
+    assert get_response.json() == expected_error
+    assert patch_response.json() == expected_error
 
 
 def test_empty_patch_returns_400(
@@ -213,3 +237,103 @@ def test_empty_patch_returns_400(
     assert response.json()["detail"] == (
         "至少需要提供一个要更新的字段。"
     )
+
+
+def test_get_customer_returns_details(
+    api_client: TestClient,
+) -> None:
+    response = api_client.get("/customers/1")
+
+    assert response.status_code == 200
+
+    customer = response.json()
+
+    assert customer["customer_id"] == 1
+    assert customer["name"] == "测试 VIP 客户"
+    assert customer["email"] == "vip@example.com"
+    assert customer["level"] == "VIP"
+    assert customer["is_vip"] is True
+    assert customer["created_at"] is not None
+
+
+def test_get_order_returns_details(
+    api_client: TestClient,
+) -> None:
+    response = api_client.get("/orders/1")
+
+    assert response.status_code == 200
+
+    order = response.json()
+
+    assert order["order_id"] == 1
+    assert order["order_number"] == "TEST-ORDER-001"
+    assert order["customer_id"] == 1
+    assert order["status"] == "paid"
+    assert order["total_amount"] == "299.00"
+    assert order["created_at"] is not None
+
+
+def test_missing_customer_returns_unified_404(
+    api_client: TestClient,
+) -> None:
+    response = api_client.get("/customers/999")
+
+    assert response.status_code == 404
+    assert response.json() == {
+        "error": {
+            "code": "CUSTOMER_NOT_FOUND",
+            "message": "客户 999 不存在。",
+            "resource": "customer",
+            "resource_id": 999,
+        },
+    }
+
+
+def test_missing_order_returns_unified_404(
+    api_client: TestClient,
+) -> None:
+    response = api_client.get("/orders/999")
+
+    assert response.status_code == 404
+    assert response.json() == {
+        "error": {
+            "code": "ORDER_NOT_FOUND",
+            "message": "订单 999 不存在。",
+            "resource": "order",
+            "resource_id": 999,
+        },
+    }
+
+
+def test_openapi_describes_resource_responses(
+    api_client: TestClient,
+) -> None:
+    openapi = api_client.get("/openapi.json").json()
+    schemas = openapi["components"]["schemas"]
+
+    customer_fields = schemas["CustomerResponse"]["properties"]
+    order_fields = schemas["OrderResponse"]["properties"]
+    error_fields = schemas["ErrorDetail"]["properties"]
+
+    assert all(
+        "description" in field
+        for field in customer_fields.values()
+    )
+    assert all(
+        "description" in field
+        for field in order_fields.values()
+    )
+    assert all(
+        "description" in field
+        for field in error_fields.values()
+    )
+
+    customer_404 = openapi["paths"][
+        "/customers/{customer_id}"
+    ]["get"]["responses"]["404"]
+    order_404 = openapi["paths"][
+        "/orders/{order_id}"
+    ]["get"]["responses"]["404"]
+
+    assert customer_404["description"] == "客户不存在。"
+    assert order_404["description"] == "订单不存在。"

@@ -1,10 +1,15 @@
 from sqlalchemy.orm import Session
 
+from app.core.exceptions import (
+    CustomerNotFoundError,
+    OrderNotFoundError,
+    TicketNotFoundError,
+)
 from app.models import Customer, Ticket
+from app.repositories.customer_repository import get_customer_by_id
+from app.repositories.order_repository import get_order_for_customer
 from app.repositories.ticket_repository import (
     add_ticket,
-    get_customer_by_id,
-    get_order_for_customer,
     get_ticket_by_id,
     list_tickets,
 )
@@ -19,18 +24,6 @@ from ticket_core.models import (
 )
 from ticket_core.rules import decide_ticket
 from ticket_core.validators import validate_ticket_input
-
-
-class CustomerNotFoundError(LookupError):
-    """客户不存在。"""
-
-
-class OrderNotFoundError(LookupError):
-    """订单不存在或不属于指定客户。"""
-
-
-class TicketNotFoundError(LookupError):
-    """工单不存在。"""
 
 
 def _make_decision(
@@ -72,9 +65,7 @@ def create_ticket(
         payload.customer_id,
     )
     if customer is None:
-        raise CustomerNotFoundError(
-            f"客户 {payload.customer_id} 不存在。",
-        )
+        raise CustomerNotFoundError(payload.customer_id)
 
     if payload.order_id is not None:
         order = get_order_for_customer(
@@ -84,7 +75,8 @@ def create_ticket(
         )
         if order is None:
             raise OrderNotFoundError(
-                f"订单 {payload.order_id} 不存在或不属于该客户。",
+                payload.order_id,
+                payload.customer_id,
             )
 
     decision = _make_decision(
@@ -131,9 +123,7 @@ def get_ticket(
         ticket_id,
     )
     if ticket is None:
-        raise TicketNotFoundError(
-            f"工单 {ticket_id} 不存在。",
-        )
+        raise TicketNotFoundError(ticket_id)
 
     return ticket
 
@@ -198,9 +188,7 @@ def update_ticket(
             ticket.customer_id,
         )
         if customer is None:
-            raise CustomerNotFoundError(
-                f"客户 {ticket.customer_id} 不存在。",
-            )
+            raise CustomerNotFoundError(ticket.customer_id)
 
         decision = _make_decision(
             customer=customer,

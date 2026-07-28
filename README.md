@@ -2,7 +2,7 @@
 
 ServiceMind 是一个使用 Python 和 FastAPI 开发的智能客服工单系统。
 项目支持客户输入校验、工单优先级判断、处理团队分配、SLA 计算、CLI 操作和 HTTP API。目前保留 SQLite 作为第一阶段 CLI 数据库，同时使用 Docker、PostgreSQL 和 SQLAlchemy 支撑 FastAPI 工单 CRUD。
-当前 FastAPI 已通过 Service 和 Repository 正式连接 PostgreSQL，支持工单创建、单条查询、部分更新、分页和组合筛选；创建与关键字段更新会自动调用第一周规则引擎。
+当前 FastAPI 已通过 Service 和 Repository 正式连接 PostgreSQL，支持工单创建、查询、部分更新、分页和组合筛选，以及客户与订单详情查询；创建与关键字段更新会自动调用第一周规则引擎，所有资源不存在错误使用统一 404 响应。
 
 ## 当前学习进度
 
@@ -214,6 +214,38 @@ Session 与事务
 PostgreSQL 17
 ```
 
+### Day 12：客户、订单工具接口与统一 404
+
+- 实现 `GET /customers/{customer_id}`
+- 实现 `GET /orders/{order_id}`
+- 使用独立 Customer、Order Repository 管理各自资源
+- 使用独立 Customer、Order Service 处理资源查询
+- 建立统一的 `ResourceNotFoundError` 基类
+- 为客户、订单和工单定义稳定的机器可读错误码
+- 使用全局异常处理器统一生成 HTTP 404 JSON
+- 统一错误响应包含错误码、消息、资源类型和资源编号
+- 使用 Pydantic `Field` 为客户、订单和错误响应补充字段说明
+- 在 OpenAPI 中声明两个新接口的 404 响应模型
+- Swagger 验证客户、订单正常查询与统一 404
+- 工单接口同步切换到全局资源异常处理
+- Customer、Order、Ticket Repository 职责完成去重
+- FastAPI API 测试从 10 个增加到 15 个
+- 全项目 34 个 pytest 测试通过
+- Ruff 与 Python 依赖检查通过
+
+统一资源错误格式：
+
+```json
+{
+  "error": {
+    "code": "CUSTOMER_NOT_FOUND",
+    "message": "客户 999 不存在。",
+    "resource": "customer",
+    "resource_id": 999
+  }
+}
+```
+
 
 ## 项目结构
 
@@ -224,23 +256,34 @@ servicemind-ai-agent/
 │   │   ├── __init__.py
 │   │   └── routes/
 │   │       ├── __init__.py
+│   │       ├── customers.py
 │   │       ├── health.py
+│   │       ├── orders.py
 │   │       └── tickets.py
 │   ├── core/
 │   │   ├── __init__.py
 │   │   ├── config.py
-│   │   └── database.py
+│   │   ├── database.py
+│   │   ├── exception_handlers.py
+│   │   └── exceptions.py
 │   ├── models/
 │   │   ├── __init__.py
 │   │   └── entities.py
 │   ├── repositories/
 │   │   ├── __init__.py
+│   │   ├── customer_repository.py
+│   │   ├── order_repository.py
 │   │   └── ticket_repository.py
 │   ├── schemas/
 │   │   ├── __init__.py
+│   │   ├── customers.py
+│   │   ├── errors.py
+│   │   ├── orders.py
 │   │   └── tickets.py
 │   ├── services/
 │   │   ├── __init__.py
+│   │   ├── customer_service.py
+│   │   ├── order_service.py
 │   │   └── ticket_service.py
 │   ├── __init__.py
 │   └── main.py
@@ -373,7 +416,7 @@ python -m pip check
 预期结果：
 
 ```text
-29 passed
+34 passed
 All checks passed!
 No broken requirements found.
 ```
@@ -428,6 +471,8 @@ python -m uvicorn app.main:app --reload
 
 ```text
 GET   /health
+GET   /customers/{customer_id}
+GET   /orders/{order_id}
 POST  /tickets
 GET   /tickets
 GET   /tickets/{ticket_id}
@@ -465,7 +510,7 @@ python -m pytest -q
 当前测试结果：
 
 ```text
-29 passed
+34 passed
 ```
 
 ### 单独运行输入校验测试
@@ -521,7 +566,7 @@ ruff check .
 - 安全规则优先级
 - 超时规则优先级
 
-### FastAPI 接口：10个测试
+### FastAPI 接口：15个测试
 
 - 健康检查返回 200
 - 创建工单并执行 VIP 规则
@@ -533,6 +578,11 @@ ruff check .
 - 非法请求返回 422
 - 不存在工单的查询和更新返回 404
 - 空 PATCH 请求返回 400
+- 查询客户详情
+- 查询订单详情
+- 不存在客户返回统一 404
+- 不存在订单返回统一 404
+- OpenAPI 包含资源字段说明和 404 响应说明
 
 ### 配置系统：2个测试
 
@@ -565,10 +615,15 @@ ruff check .
 - FastAPI Service 与 SQLAlchemy Repository 正式连接
 - PostgreSQL 工单创建、查询和部分更新
 - 工单分页及状态、优先级、问题类型组合筛选
+- PostgreSQL 客户和订单详情查询
 - 创建与更新工单时自动执行规则引擎
 - SQLAlchemy Session 事务提交与异常回滚
+- 客户、订单和工单统一资源异常
+- 全局 HTTP 404 异常处理器
+- 带稳定错误码和资源信息的统一错误响应
+- OpenAPI 客户、订单和错误字段说明
 - 独立 SQLite 内存数据库 API 测试
-- 29 个 pytest 自动化测试
+- 34 个 pytest 自动化测试
 - Ruff 代码质量检查
 
 ## 项目亮点
@@ -591,13 +646,16 @@ ruff check .
 16. 使用 PostgreSQL 实现工单创建、详情查询、部分更新、分页和组合筛选。
 17. 工单等待时间变化时自动重新计算优先级、处理团队、SLA 和原因。
 18. 使用 FastAPI 依赖覆盖和 SQLite 内存数据库隔离 API 自动化测试。
-19. 使用 pytest fixture、parametrize 和 MonkeyPatch 建立 29 个自动化测试。
-20. 使用 Ruff、依赖检查和完整回归测试保证代码质量。
+19. 使用全局异常处理器统一客户、订单和工单的 404 JSON 格式。
+20. 使用稳定错误码、资源类型和资源编号帮助前端处理异常。
+21. 使用 Pydantic 字段说明和 OpenAPI 响应模型完善接口文档。
+22. 使用 pytest fixture、parametrize 和 MonkeyPatch 建立 34 个自动化测试。
+23. 使用 Ruff、依赖检查和完整回归测试保证代码质量。
 
 ## 后续计划
 
-- 实现客户与订单查询接口
 - 使用 Alembic 管理数据库迁移
+- 实现客户与订单列表、创建和更新接口
 - 为列表增加排序、日期范围和关键字搜索
 - 增加并发更新控制与更细粒度的事务策略
 - 接入大模型进行工单分类和回复生成
