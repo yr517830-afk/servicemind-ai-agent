@@ -1,28 +1,84 @@
-from pathlib import Path
+from sqlalchemy import func, select
+from sqlalchemy.orm import Session
 
-from app.core.config import settings
-from ticket_core.models import TicketDecision, TicketInput
-from ticket_core.repository import list_tickets
-from ticket_core.repository import save_ticket as save_ticket_to_database
+from app.models import Customer, Order, Ticket
+from ticket_core.models import IssueType, Priority
 
 
-def save(
-    ticket: TicketInput,
-    decision: TicketDecision,
-) -> int:
-    """保存工单并返回数据库生成的工单编号。"""
-    database_path = Path(settings.database_path)
+def get_customer_by_id(
+    session: Session,
+    customer_id: int,
+) -> Customer | None:
+    """按编号查询客户。"""
+    return session.get(Customer, customer_id)
 
-    return save_ticket_to_database(
-        ticket,
-        decision,
-        database_path,
+
+def get_order_for_customer(
+    session: Session,
+    order_id: int,
+    customer_id: int,
+) -> Order | None:
+    """查询属于指定客户的订单。"""
+    statement = select(Order).where(
+        Order.id == order_id,
+        Order.customer_id == customer_id,
     )
+    return session.scalar(statement)
 
 
-def list_recent() -> list[dict[str, object]]:
-    """查询数据库中最近保存的工单。"""
-    database_path = Path(settings.database_path)
-    rows = list_tickets(database_path)
+def add_ticket(
+    session: Session,
+    ticket: Ticket,
+) -> Ticket:
+    """添加工单并取得数据库生成的数据。"""
+    session.add(ticket)
+    session.flush()
+    session.refresh(ticket)
+    return ticket
 
-    return [dict(row) for row in rows]
+
+def get_ticket_by_id(
+    session: Session,
+    ticket_id: int,
+) -> Ticket | None:
+    """按编号查询工单。"""
+    return session.get(Ticket, ticket_id)
+
+
+def list_tickets(
+    session: Session,
+    *,
+    page: int,
+    page_size: int,
+    status: str | None = None,
+    priority: Priority | None = None,
+    issue_type: IssueType | None = None,
+) -> tuple[list[Ticket], int]:
+    """分页查询工单，并返回当前页数据和总数。"""
+    filters = []
+
+    if status is not None:
+        filters.append(Ticket.status == status)
+
+    if priority is not None:
+        filters.append(Ticket.priority == priority.value)
+
+    if issue_type is not None:
+        filters.append(Ticket.issue_type == issue_type.value)
+
+    count_statement = select(func.count(Ticket.id)).where(*filters)
+    total = session.scalar(count_statement) or 0
+
+    query_statement = (
+        select(Ticket)
+        .where(*filters)
+        .order_by(
+            Ticket.created_at.desc(),
+            Ticket.id.desc(),
+        )
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+    )
+    tickets = list(session.scalars(query_statement))
+
+    return tickets, total

@@ -2549,3 +2549,552 @@ Day 11 将完成：
 - [x] 全项目 22 个测试通过
 - [x] Ruff 全项目检查通过
 - [x] README 已全面更新
+
+---
+
+# Day 11：工单 CRUD 与 PostgreSQL 持久化
+
+日期：2026-07-28
+
+## 今日目标
+
+1. 将 FastAPI Service 和 Repository 正式连接 SQLAlchemy。
+2. 实现工单创建、查询和部分更新接口。
+3. 为工单列表增加分页与组合筛选。
+4. 创建和更新工单时自动调用第一周规则。
+5. 使用独立测试数据库验证完整 API 流程。
+6. 通过 Swagger 完成创建、查询和更新验收。
+
+## 今日完成内容
+
+### 1. 验证 Day 10 基线
+
+开始开发前执行：
+
+```powershell
+git status --short
+docker compose ps
+python -m pytest -q
+ruff check .
+```
+
+代码工作区保持干净，原有测试结果为：
+
+```text
+22 passed
+All checks passed!
+```
+
+Docker Desktop 最初尚未启动，启动 Docker Engine 后执行：
+
+```powershell
+docker compose up -d postgres
+docker compose ps
+```
+
+PostgreSQL 恢复为：
+
+```text
+servicemind-postgres
+Up (healthy)
+```
+
+### 2. 重新设计工单 API Schema
+
+Day 10 的临时接口由客户端提交：
+
+```text
+customer_name
+is_vip
+```
+
+这种方式不适合真实数据库系统，因为客户端不应自行声明 VIP 身份。
+
+Day 11 改为提交：
+
+```text
+customer_id
+order_id
+issue_type
+message
+wait_minutes
+```
+
+Service 根据 `customer_id` 从 PostgreSQL 读取真实客户资料，再把客户等级和 VIP 状态交给规则引擎。
+
+新增 Schema：
+
+```text
+TicketCreate
+TicketUpdate
+TicketResponse
+TicketListResponse
+TicketStatus
+```
+
+`TicketUpdate` 支持部分修改：
+
+```text
+message
+wait_minutes
+status
+```
+
+`TicketResponse` 使用：
+
+```python
+ConfigDict(from_attributes=True)
+```
+
+从 SQLAlchemy ORM 对象生成 API 响应。
+
+### 3. 将 Repository 切换到 SQLAlchemy
+
+Day 9 的 `ticket_repository.py` 仍然封装第一阶段 SQLite 函数。
+
+Day 11 将其替换为 SQLAlchemy Repository，提供：
+
+```text
+get_customer_by_id()
+get_order_for_customer()
+add_ticket()
+get_ticket_by_id()
+list_tickets()
+```
+
+列表查询支持：
+
+- 页码
+- 每页数量
+- 状态
+- 优先级
+- 问题类型
+
+分页通过：
+
+```python
+offset((page - 1) * page_size)
+limit(page_size)
+```
+
+实现，总数通过：
+
+```python
+select(func.count(Ticket.id))
+```
+
+单独查询。
+
+### 4. Service 连接数据库与规则引擎
+
+Service 创建工单时执行以下流程：
+
+```text
+读取客户
+    ↓
+验证客户存在
+    ↓
+验证订单属于该客户
+    ↓
+转换为 TicketInput
+    ↓
+调用 validate_ticket_input()
+    ↓
+调用 decide_ticket()
+    ↓
+生成 Ticket ORM 对象
+    ↓
+Repository 写入数据库
+    ↓
+提交事务
+```
+
+规则引擎使用数据库中的真实客户资料构建：
+
+```text
+CustomerProfile
+```
+
+不再信任请求中自行声明的 VIP 状态。
+
+新增资源异常：
+
+```text
+CustomerNotFoundError
+OrderNotFoundError
+TicketNotFoundError
+```
+
+### 5. 事务提交与回滚
+
+新工单创建和工单更新都由 Service 控制事务：
+
+```python
+session.commit()
+```
+
+发生数据库异常时执行：
+
+```python
+session.rollback()
+```
+
+Repository 负责查询和添加对象，Service 负责决定一个完整业务操作何时提交。
+
+这样可以避免 Repository 中多个小步骤各自提交，导致业务流程只完成一部分。
+
+### 6. 实现四个工单接口
+
+最终接口：
+
+```text
+POST  /tickets
+GET   /tickets
+GET   /tickets/{ticket_id}
+PATCH /tickets/{ticket_id}
+```
+
+各接口职责：
+
+- `POST /tickets`：校验客户与订单、执行规则并创建工单。
+- `GET /tickets`：分页查询并支持组合筛选。
+- `GET /tickets/{ticket_id}`：查询单张工单。
+- `PATCH /tickets/{ticket_id}`：部分更新工单。
+
+API 将异常转换为：
+
+```text
+资源不存在 → 404
+业务输入错误 → 400
+Pydantic 请求校验错误 → 422
+```
+
+### 7. 更新时自动重新执行规则
+
+如果 PATCH 修改：
+
+```text
+message
+wait_minutes
+```
+
+Service 会重新构建 `TicketInput` 并执行第一周规则。
+
+如果只修改：
+
+```text
+status
+```
+
+则不需要重复计算工单优先级。
+
+这避免无关更新产生不必要的规则计算，同时保证影响决策的数据发生变化后，优先级、团队、SLA 和原因保持一致。
+
+### 8. 验证 FastAPI 路由
+
+最初尝试直接遍历：
+
+```python
+app.routes
+```
+
+FastAPI 0.140 中包含没有 `path` 属性的 `_IncludedRouter`，因此出现：
+
+```text
+AttributeError: '_IncludedRouter' object has no attribute 'path'
+```
+
+改为检查 Swagger 使用的 OpenAPI：
+
+```python
+app.openapi()["paths"]
+```
+
+确认：
+
+```text
+/tickets               GET, POST
+/tickets/{ticket_id}   GET, PATCH
+```
+
+这说明问题出在检查命令，不是路由注册失败。
+
+### 9. Swagger 创建真实工单
+
+通过 `POST /tickets` 提交：
+
+```json
+{
+  "customer_id": 1,
+  "order_id": 1,
+  "issue_type": "物流",
+  "message": "Day 11：VIP 客户查询订单物流进度。",
+  "wait_minutes": 15
+}
+```
+
+返回：
+
+```text
+HTTP 201
+ticket_id: 2
+priority: P1
+assigned_team: VIP 客服组
+sla_minutes: 30
+status: received
+```
+
+说明以下链路已经打通：
+
+```text
+POST
+→ FastAPI
+→ Service
+→ 第一周规则
+→ SQLAlchemy
+→ PostgreSQL
+```
+
+### 10. 查询持久化工单
+
+通过：
+
+```text
+GET /tickets/2
+```
+
+返回 HTTP 200，并得到与创建响应相同的数据。
+
+这证明创建接口返回的不是临时对象，而是 PostgreSQL 中已经提交的数据。
+
+### 11. PATCH 更新与规则重算
+
+通过：
+
+```json
+{
+  "wait_minutes": 180,
+  "status": "processing"
+}
+```
+
+更新工单 2。
+
+结果：
+
+```text
+wait_minutes: 180
+status: processing
+priority: P1
+assigned_team: 综合客服组
+sla_minutes: 30
+reason: 客户等待时间已达到阈值，需要升级处理。
+```
+
+原工单命中 VIP 规则；等待时间更新为 180 分钟后，重新命中等待超时规则。
+
+### 12. 分页与组合筛选
+
+使用：
+
+```text
+page=1
+page_size=1
+status=processing
+priority=P1
+issue_type=物流
+```
+
+查询结果：
+
+```text
+items: ticket_id 2
+page: 1
+page_size: 1
+total: 1
+pages: 1
+```
+
+证明分页元数据和三项组合筛选均正确。
+
+### 13. 独立 API 测试数据库
+
+自动化测试不能直接使用开发环境 PostgreSQL，否则会产生：
+
+- 测试垃圾数据
+- 测试之间互相影响
+- 依赖 Docker 是否启动
+- 本地与 CI 结果不一致
+
+Day 11 使用：
+
+```text
+SQLite 内存数据库
+StaticPool
+FastAPI dependency_overrides
+```
+
+测试夹具为每个 API 测试创建独立数据库，插入一个 VIP 客户和一张订单，并覆盖：
+
+```python
+get_db
+```
+
+测试结束后清理依赖覆盖并释放数据库。
+
+真实 PostgreSQL 开发数据不会被自动化测试修改。
+
+### 14. API 自动化测试
+
+FastAPI 测试从 3 个增加到 10 个：
+
+1. 健康检查。
+2. 创建工单并命中 VIP 规则。
+3. 查询已持久化工单。
+4. 分页与组合筛选。
+5. PATCH 更新并重新执行规则。
+6. 不存在客户返回 404。
+7. 不存在或不属于客户的订单返回 404。
+8. 非法请求返回 422。
+9. 不存在工单的查询和更新返回 404。
+10. 空 PATCH 返回 400。
+
+单独运行：
+
+```powershell
+python -m pytest tests/test_api.py -v
+```
+
+结果：
+
+```text
+10 passed
+```
+
+### 15. 全项目验收
+
+执行：
+
+```powershell
+python -m pytest -q
+ruff check .
+python -m pip check
+docker compose ps
+```
+
+最终结果：
+
+```text
+29 passed
+All checks passed!
+No broken requirements found.
+PostgreSQL healthy
+```
+
+## 今日遇到的问题
+
+### 问题一：Docker API 无法连接
+
+原因是 Docker Desktop 尚未启动，命名管道不存在。
+
+启动 Docker Desktop 后，Docker Engine 恢复；再执行：
+
+```powershell
+docker compose up -d postgres
+```
+
+PostgreSQL 容器恢复健康。
+
+### 问题二：直接遍历 FastAPI 路由时报错
+
+FastAPI 0.140 的 `app.routes` 中包含 `_IncludedRouter`，它没有 `path` 属性。
+
+最终改用 `getattr()` 安全检查，并直接读取 `app.openapi()["paths"]` 验证 Swagger 路径。
+
+### 问题三：旧 API 允许客户端声明 VIP
+
+客户端提交 `is_vip=true` 不可信，可能绕过业务规则。
+
+Day 11 改为提交 `customer_id`，Service 从数据库读取客户等级和 VIP 状态。
+
+### 问题四：自动化测试可能污染 PostgreSQL
+
+如果 API 测试直接连接开发数据库，每次运行都会插入真实工单。
+
+使用 FastAPI 依赖覆盖和 SQLite 内存数据库后，测试可以独立、快速、重复运行。
+
+## 今日收获
+
+1. 学会让 FastAPI 通过依赖注入获得 SQLAlchemy Session。
+2. 学会使用 Service 编排数据库查询、业务校验和规则决策。
+3. 理解 Repository 负责数据访问，Service 负责事务边界。
+4. 学会实现 REST 风格的 POST、GET 和 PATCH。
+5. 学会设计分页响应中的 `page`、`page_size`、`total` 和 `pages`。
+6. 学会实现多个可选条件的组合筛选。
+7. 学会验证订单与客户的归属关系。
+8. 学会把资源不存在映射为 HTTP 404。
+9. 学会把业务错误与 Pydantic 422 错误区分开。
+10. 学会在关键字段更新后重新执行规则。
+11. 学会使用 `dependency_overrides` 替换测试依赖。
+12. 学会使用 SQLite 内存数据库隔离 API 测试。
+13. 学会通过 OpenAPI 验证实际路由。
+14. 学会用 Swagger 验收完整 CRUD 流程。
+
+## 对求职的帮助
+
+Day 11 将 ServiceMind 从“具备 PostgreSQL ORM 基础设施”升级为“API 能够真正读写关系型数据库”的项目。
+
+能够体现：
+
+- FastAPI CRUD 开发能力
+- REST API 设计能力
+- SQLAlchemy Repository 实现能力
+- Service 业务编排能力
+- 数据库事务管理意识
+- 资源关系校验能力
+- 分页与动态筛选能力
+- 规则引擎集成能力
+- HTTP 错误语义设计能力
+- 测试数据库隔离能力
+- Swagger 手工验收能力
+- 自动化回归测试能力
+
+## 面试表达
+
+我将 ServiceMind 的 FastAPI Service 和 Repository 正式连接到 SQLAlchemy 与 PostgreSQL，实现了工单创建、详情查询、部分更新、分页和状态、优先级、问题类型组合筛选。创建工单时，Service 会从数据库读取真实客户资料、校验订单归属，再调用已有的输入校验器和规则引擎生成优先级、处理团队、SLA 与原因。更新等待时间后也会自动重新执行规则。测试层使用 FastAPI 依赖覆盖和 SQLite 内存数据库隔离数据，最终 10 个 API 测试及全项目 29 个测试全部通过。
+
+## 当前边界
+
+Day 11 已完成工单 API 的创建、查询、更新、分页和筛选，但当前仍有以下边界：
+
+- 尚未提供删除工单接口。
+- 尚未提供客户和订单 CRUD。
+- 数据库结构变更尚未使用 Alembic。
+- 列表尚未支持排序、时间范围和关键字搜索。
+- 尚未实现登录、权限和并发更新控制。
+- 尚未接入大模型分类与回复生成。
+
+## Day 11 完成情况
+
+- [x] PostgreSQL 容器健康
+- [x] 工单 Schema 支持创建、更新和分页响应
+- [x] Repository 切换到 SQLAlchemy
+- [x] Service 读取真实客户资料
+- [x] Service 校验订单归属
+- [x] Service 调用第一周校验器和规则引擎
+- [x] Service 管理事务提交和回滚
+- [x] 实现 `POST /tickets`
+- [x] 实现 `GET /tickets`
+- [x] 实现 `GET /tickets/{ticket_id}`
+- [x] 实现 `PATCH /tickets/{ticket_id}`
+- [x] 实现分页
+- [x] 实现状态、优先级和问题类型筛选
+- [x] 资源不存在返回 404
+- [x] 空 PATCH 返回 400
+- [x] Swagger 创建、查询、更新验收通过
+- [x] 使用独立 SQLite 内存测试数据库
+- [x] 10 个 API 自动化测试通过
+- [x] 全项目 29 个测试通过
+- [x] Ruff 全项目检查通过
+- [x] Python 依赖检查通过
+- [x] README 已全面更新

@@ -1,8 +1,8 @@
 # ServiceMind AI Agent
 
 ServiceMind 是一个使用 Python 和 FastAPI 开发的智能客服工单系统。
-项目支持客户输入校验、工单优先级判断、处理团队分配、SLA 计算、CLI 操作和 HTTP API。目前保留 SQLite 作为第一阶段 CLI 数据库，同时使用 Docker、PostgreSQL 和 SQLAlchemy 建立客户、订单与工单的关系型数据模型。
-当前 PostgreSQL ORM 已完成建表、种子数据和关联查询；FastAPI CRUD 与 PostgreSQL 的正式连接将在 Day 11 完成。
+项目支持客户输入校验、工单优先级判断、处理团队分配、SLA 计算、CLI 操作和 HTTP API。目前保留 SQLite 作为第一阶段 CLI 数据库，同时使用 Docker、PostgreSQL 和 SQLAlchemy 支撑 FastAPI 工单 CRUD。
+当前 FastAPI 已通过 Service 和 Repository 正式连接 PostgreSQL，支持工单创建、单条查询、部分更新、分页和组合筛选；创建与关键字段更新会自动调用第一周规则引擎。
 
 ## 当前学习进度
 
@@ -147,7 +147,7 @@ SQLite 数据库
 - Ruff 全项目检查通过
 - PostgreSQL 容器健康检查通过
 
-当前数据链路：
+Day 10 阶段的数据链路：
 
 ```text
 CLI 工单流程
@@ -171,6 +171,47 @@ Service
 当前返回临时响应
     ↓
 Day 11 接入 PostgreSQL CRUD
+```
+
+### Day 11：工单 CRUD 与规则引擎集成
+
+- 将 FastAPI Service 和 Repository 正式切换到 SQLAlchemy Session
+- 实现 `POST /tickets` 创建并持久化工单
+- 实现 `GET /tickets/{ticket_id}` 查询单张工单
+- 实现 `GET /tickets` 分页查询
+- 支持按状态、优先级和问题类型组合筛选
+- 实现 `PATCH /tickets/{ticket_id}` 部分更新
+- 创建工单时从 PostgreSQL 读取真实客户和订单
+- 验证订单必须属于指定客户
+- 创建与关键字段更新时自动调用第一周规则引擎
+- 将资源不存在转换为 HTTP 404
+- 将空更新等业务错误转换为 HTTP 400
+- 使用独立 SQLite 内存数据库完成 API 自动化测试
+- API 测试不会污染本地 PostgreSQL 开发数据
+- Swagger 完成创建、查询、更新和分页筛选验收
+- FastAPI API 测试从 3 个增加到 10 个
+- 全项目 29 个 pytest 测试通过
+- Ruff 与 Python 依赖检查通过
+
+当前 FastAPI 数据链路：
+
+```text
+HTTP 请求
+    ↓
+FastAPI API 路由
+    ↓
+Pydantic Schema
+    ↓
+Service 业务层
+    ├── 客户与订单校验
+    ├── 第一周输入校验器
+    └── 第一周规则引擎
+    ↓
+SQLAlchemy Repository
+    ↓
+Session 与事务
+    ↓
+PostgreSQL 17
 ```
 
 
@@ -332,7 +373,7 @@ python -m pip check
 预期结果：
 
 ```text
-22 passed
+29 passed
 All checks passed!
 No broken requirements found.
 ```
@@ -386,8 +427,11 @@ python -m uvicorn app.main:app --reload
 当前接口：
 
 ```text
-GET  /health
-POST /tickets
+GET   /health
+POST  /tickets
+GET   /tickets
+GET   /tickets/{ticket_id}
+PATCH /tickets/{ticket_id}
 ```
 
 ### 启动命令行工单系统
@@ -421,7 +465,7 @@ python -m pytest -q
 当前测试结果：
 
 ```text
-22 passed
+29 passed
 ```
 
 ### 单独运行输入校验测试
@@ -477,11 +521,18 @@ ruff check .
 - 安全规则优先级
 - 超时规则优先级
 
-### FastAPI接口：3个测试
+### FastAPI 接口：10个测试
 
-- 健康检查返回200
-- 合法工单创建返回201
-- 非法工单请求返回422
+- 健康检查返回 200
+- 创建工单并执行 VIP 规则
+- 查询 PostgreSQL 持久化工单
+- 分页与组合筛选
+- 更新工单并重新执行规则
+- 不存在客户返回 404
+- 不存在或不属于客户的订单返回 404
+- 非法请求返回 422
+- 不存在工单的查询和更新返回 404
+- 空 PATCH 请求返回 400
 
 ### 配置系统：2个测试
 
@@ -503,7 +554,7 @@ ruff check .
 - SQLite 工单持久化
 - CLI 工单录入、预览、保存和历史查询
 - 重复工单拦截
-- FastAPI 健康检查和工单创建接口
+- FastAPI 健康检查和工单 CRUD 接口
 - Pydantic 请求与响应校验
 - API、Schema、Service、Repository 和 Core 分层
 - `pydantic-settings` 环境配置管理
@@ -511,7 +562,13 @@ ruff check .
 - SQLAlchemy 2.0 数据库基础设施
 - 客户、订单和工单 ORM 关系模型
 - PostgreSQL 种子数据和关联查询
-- 22 个 pytest 自动化测试
+- FastAPI Service 与 SQLAlchemy Repository 正式连接
+- PostgreSQL 工单创建、查询和部分更新
+- 工单分页及状态、优先级、问题类型组合筛选
+- 创建与更新工单时自动执行规则引擎
+- SQLAlchemy Session 事务提交与异常回滚
+- 独立 SQLite 内存数据库 API 测试
+- 29 个 pytest 自动化测试
 - Ruff 代码质量检查
 
 ## 项目亮点
@@ -530,16 +587,19 @@ ruff check .
 12. 使用外键约束保证客户、订单和工单之间的引用关系。
 13. 使用幂等种子脚本避免重复插入演示数据。
 14. 使用 `selectinload()` 和 `joinedload()` 验证 ORM 关联加载。
-15. 使用 pytest fixture、parametrize 和 MonkeyPatch 建立 22 个自动化测试。
-16. 使用 Ruff 和完整回归测试保证重构后的代码质量。
+15. 使用 Service 编排客户校验、订单归属校验、规则决策和数据库事务。
+16. 使用 PostgreSQL 实现工单创建、详情查询、部分更新、分页和组合筛选。
+17. 工单等待时间变化时自动重新计算优先级、处理团队、SLA 和原因。
+18. 使用 FastAPI 依赖覆盖和 SQLite 内存数据库隔离 API 自动化测试。
+19. 使用 pytest fixture、parametrize 和 MonkeyPatch 建立 29 个自动化测试。
+20. 使用 Ruff、依赖检查和完整回归测试保证代码质量。
 
 ## 后续计划
 
-- 实现 PostgreSQL 工单创建、查询和更新 CRUD
-- 为工单列表增加分页和状态筛选
 - 实现客户与订单查询接口
-- 将 FastAPI Service 和 Repository 正式连接到 SQLAlchemy
-- 增加数据库事务与 API 自动化测试
+- 使用 Alembic 管理数据库迁移
+- 为列表增加排序、日期范围和关键字搜索
+- 增加并发更新控制与更细粒度的事务策略
 - 接入大模型进行工单分类和回复生成
 - 增加用户认证、权限控制和部署配置
 

@@ -1,17 +1,33 @@
-from pydantic import BaseModel,Field
+from datetime import datetime
+from typing import Literal
 
-from ticket_core.models import IssueType
+from pydantic import BaseModel, ConfigDict, Field
+
+from ticket_core.models import IssueType, Priority
+
+
+TicketStatus = Literal[
+    "received",
+    "processing",
+    "resolved",
+    "closed",
+]
+
 
 class TicketCreate(BaseModel):
     """创建工单时由客户端提交的数据。"""
 
-    customer_name: str = Field(
-        min_length=1,
-        max_length=100,
-        examples=["小王"],
+    customer_id: int = Field(
+        ge=1,
+        examples=[1],
+    )
+    order_id: int | None = Field(
+        default=None,
+        ge=1,
+        examples=[1],
     )
     issue_type: IssueType
-    message: str =Field(
+    message: str = Field(
         min_length=1,
         max_length=1000,
         examples=["我的订单什么时候送到？"],
@@ -21,13 +37,50 @@ class TicketCreate(BaseModel):
         ge=0,
         examples=[15],
     )
-    is_vip: bool = Field(
-        default=False,
-        examples=[True],
+
+
+class TicketUpdate(BaseModel):
+    """更新工单时允许修改的数据。"""
+
+    message: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=1000,
     )
+    wait_minutes: int | None = Field(
+        default=None,
+        ge=0,
+    )
+    status: TicketStatus | None = None
 
-class TicketResponse(TicketCreate):
-    """工单创建成功后返回的数据。"""
 
-    ticket_id: int =Field(ge=1)
-    status: str =Field(examples=["received"])
+class TicketResponse(BaseModel):
+    """API 返回的工单数据。"""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    ticket_id: int = Field(
+        validation_alias="id",
+        ge=1,
+    )
+    customer_id: int
+    order_id: int | None
+    issue_type: IssueType
+    message: str
+    wait_minutes: int
+    priority: Priority
+    assigned_team: str
+    sla_minutes: int
+    reason: str
+    status: TicketStatus
+    created_at: datetime
+
+
+class TicketListResponse(BaseModel):
+    """分页工单列表。"""
+
+    items: list[TicketResponse]
+    page: int
+    page_size: int
+    total: int
+    pages: int
