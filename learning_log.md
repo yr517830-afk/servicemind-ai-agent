@@ -3099,6 +3099,280 @@ Day 11 已完成工单 API 的创建、查询、更新、分页和筛选，但�
 - [x] Python 依赖检查通过
 - [x] README 已全面更新
 
+# Day 13：后端自动化测试、事务回滚与日志验证
+
+## 今日目标
+
+1. 使用 FastAPI `TestClient` 完善接口自动化测试。
+2. 使用数据库外层事务隔离每个 API 测试。
+3. 确保测试结束后自动回滚种子数据和业务数据。
+4. 使用 pytest `caplog` 验证关键业务日志。
+5. 确保核心 API 至少包含 12 个自动化断言。
+
+## 完成内容
+
+### 1. API 测试数据库结构复用
+
+将 SQLite 内存数据库引擎调整为 session 级 fixture：
+
+```python
+@pytest.fixture(scope="session")
+def test_engine() -> Generator[Engine, None, None]:
+    engine = create_engine(
+        "sqlite+pysqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+
+    Base.metadata.create_all(bind=engine)
+
+    try:
+        yield engine
+    finally:
+        Base.metadata.drop_all(bind=engine)
+        engine.dispose()
+```
+
+整套 API 测试只创建一次数据库结构，避免每个测试反复建表和删表。
+
+### 2. 每个测试使用独立外层事务
+
+每次创建 `api_client` 时开启独立事务：
+
+```python
+connection = test_engine.connect()
+transaction = connection.begin()
+```
+
+测试结束后统一回滚：
+
+```python
+if transaction.is_active:
+    transaction.rollback()
+
+connection.close()
+```
+
+即使 Service 或 Repository 中调用了：
+
+```python
+session.commit()
+```
+
+测试产生的客户、订单和工单数据仍不会污染后续测试。
+
+### 3. 使用 rollback-only 事务连接模式
+
+测试 Session 配置为：
+
+```python
+testing_session_local = sessionmaker(
+    bind=connection,
+    autoflush=False,
+    expire_on_commit=False,
+    join_transaction_mode="rollback_only",
+)
+```
+
+该模式允许业务代码正常调用 `commit()`，但不会提交测试最外层事务，最终仍由 fixture 统一回滚。
+
+### 4. 使用依赖覆盖注入测试 Session
+
+通过 FastAPI 依赖覆盖，让 API 使用测试事务中的数据库 Session：
+
+```python
+def override_get_db() -> Generator[Session, None, None]:
+    with testing_session_local() as session:
+        yield session
+
+app.dependency_overrides[get_db] = override_get_db
+```
+
+测试完成后移除覆盖，防止影响其他测试：
+
+```python
+app.dependency_overrides.pop(get_db, None)
+```
+
+### 5. 增加业务日志自动化测试
+
+使用 pytest `caplog` 捕获 `ticket_core.rules` 的 INFO 日志：
+
+```python
+with caplog.at_level(
+    logging.INFO,
+    logger="ticket_core.rules",
+):
+    decision = decide_ticket(
+        ticket,
+        vip_customer,
+    )
+```
+
+验证日志中包含：
+
+```python
+assert "命中规则=vip" in caplog.text
+assert f"优先级={decision.priority.value}" in caplog.text
+assert f"团队={decision.assigned_team}" in caplog.text
+assert f"SLA={decision.sla_minutes}分钟" in caplog.text
+```
+
+日志测试能够防止关键可观测信息在后续重构中被意外删除。
+
+### 6. 核心 API 断言统计
+
+执行：
+
+```powershell
+(Select-String -Path tests/test_api.py -Pattern '^\s*assert ').Count
+```
+
+结果：
+
+```text
+60
+```
+
+核心 API 的自动化断言数量远高于计划要求的 12 个，覆盖：
+
+- 成功响应状态码和响应字段
+- 工单创建、查询、更新
+- 分页与组合筛选
+- 客户和订单查询
+- 资源不存在的统一 404
+- 请求参数校验 422
+- 空 PATCH 请求 400
+- OpenAPI 响应契约
+
+### 7. 全项目验收
+
+执行：
+
+```powershell
+python -m pytest -q
+ruff check .
+python -m pip check
+docker compose ps
+```
+
+结果：
+
+```text
+35 passed
+All checks passed!
+No broken requirements found.
+PostgreSQL healthy
+```
+
+## 今日遇到的问题
+
+### 问题一：SQLite 保存点没有按预期回滚
+
+最初使用：
+
+```python
+join_transaction_mode="create_savepoint"
+```
+
+第一个测试结束后，种子客户仍然保留在共享内存数据库中。第二个测试再次插入相同邮箱时触发：
+
+```text
+sqlite3.IntegrityError:
+UNIQUE constraint failed: customers.email
+```
+
+将连接模式调整为：
+
+```python
+join_transaction_mode="rollback_only"
+```
+
+之后外层事务可以在每个测试结束时完整清理数据，15 个 API 测试全部通过。
+
+### 问题二：手工修改 fixture 时出现括号和缩进错误
+
+修改 `sessionmaker()` 代码块时曾出现：
+
+```text
+SyntaxError: '(' was never closed
+```
+
+以及：
+
+```text
+IndentationError:
+expected an indented block after 'with' statement
+```
+
+通过先执行：
+
+```powershell
+python -m py_compile tests/conftest.py
+```
+
+可以在运行完整测试前快速检查 Python 语法和缩进。
+
+## 今日收获
+
+1. 理解测试隔离不等于每次重新创建数据库。
+2. 学会使用 session 级 fixture 复用数据库结构。
+3. 学会使用 function 级外层事务隔离每个测试。
+4. 理解业务 `commit()` 与测试外层事务之间的关系。
+5. 学会使用 `join_transaction_mode="rollback_only"`。
+6. 学会通过 FastAPI 依赖覆盖注入测试 Session。
+7. 学会在 fixture 清理阶段恢复依赖并释放连接。
+8. 学会使用 pytest `caplog` 捕获指定 logger。
+9. 学会断言日志中的业务字段，而不仅是日志是否存在。
+10. 学会使用 `py_compile` 快速定位语法和缩进问题。
+11. 学会统计并审查核心 API 的自动化断言。
+
+## 对求职的帮助
+
+Day 13 让项目测试从“接口能够通过”升级为具备数据隔离、事务清理和日志验证的后端测试体系。
+
+能够体现：
+
+- pytest fixture 设计能力
+- FastAPI TestClient 测试能力
+- SQLAlchemy 测试事务管理能力
+- 数据库测试隔离意识
+- FastAPI 依赖覆盖能力
+- API 契约与异常场景测试能力
+- pytest caplog 使用能力
+- 日志可观测性测试意识
+- 测试故障诊断能力
+
+## 面试表达
+
+我为 ServiceMind 的 FastAPI 接口测试建立了共享 SQLite 内存数据库和每测试独立事务机制。数据库结构在整套测试中只创建一次，每个测试通过独立连接开启外层事务，业务代码可以正常调用 `commit()`，但不会提交最外层测试事务，测试结束后统一回滚，因此测试数据不会相互污染。我还使用 pytest `caplog` 验证规则命中、优先级、团队和 SLA 日志。最终 15 个 API 测试、60 个核心 API 断言和全项目 35 个测试全部通过。
+
+## 当前边界
+
+- API 测试目前使用 SQLite，尚未增加 PostgreSQL 集成测试。
+- 尚未统计测试覆盖率。
+- 尚未接入持续集成流水线。
+- 尚未测试并发请求和并发事务。
+- 尚未验证结构化 JSON 日志。
+
+## Day 13 完成情况
+
+- [x] TestClient API 测试正常运行
+- [x] 测试数据库结构完成复用
+- [x] 每个 API 测试使用独立外层事务
+- [x] 测试结束后自动回滚
+- [x] FastAPI 数据库依赖完成覆盖
+- [x] SQLite 唯一数据冲突问题完成修复
+- [x] 使用 `caplog` 验证规则日志
+- [x] 日志测试包含 5 个关键断言
+- [x] 核心 API 包含 60 个断言
+- [x] 15 个 API 测试通过
+- [x] 全项目 35 个测试通过
+- [x] Ruff 全项目检查通过
+- [x] Python 依赖检查通过
+- [x] PostgreSQL 容器健康
+- [x] README 已更新
+
 ---
 
 # Day 12：客户、订单工具接口与统一 404

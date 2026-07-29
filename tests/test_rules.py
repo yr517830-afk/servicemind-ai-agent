@@ -1,3 +1,5 @@
+import logging
+
 import pytest
 from ticket_core.models import (
     IssueType,
@@ -109,3 +111,31 @@ def test_ticket_routing_rules(
     assert decision.assigned_team == expected_team
     assert decision.sla_minutes > 0
     assert decision.reason
+
+def test_ticket_routing_writes_decision_log(
+    caplog: pytest.LogCaptureFixture,
+    ticket_factory,
+    vip_customer,
+) -> None:
+    """规则执行后应该记录命中的规则和路由结果。"""
+    ticket = ticket_factory(
+        issue_type=IssueType.LOGISTICS,
+        customer_name=vip_customer.name,
+        message="查询物流进度",
+        wait_minutes=10,
+    )
+
+    with caplog.at_level(
+        logging.INFO,
+        logger="ticket_core.rules",
+    ):
+        decision = decide_ticket(
+            ticket,
+            vip_customer,
+        )
+
+    assert decision.priority == Priority.P1
+    assert "命中规则=vip" in caplog.text
+    assert f"优先级={decision.priority.value}" in caplog.text
+    assert f"团队={decision.assigned_team}" in caplog.text
+    assert f"SLA={decision.sla_minutes}分钟" in caplog.text

@@ -4,6 +4,7 @@ from decimal import Decimal
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
+from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -59,23 +60,40 @@ def ticket_factory() -> Callable[..., TicketInput]:
     return make_ticket
 
 
-@pytest.fixture
-def api_client() -> Generator[TestClient, None, None]:
-    """提供使用独立内存数据库的 API 测试客户端。"""
-    test_engine = create_engine(
+@pytest.fixture(scope="session")
+def test_engine() -> Generator[Engine, None, None]:
+    """为整套 API 测试提供共享的 SQLite 内存数据库结构。"""
+    engine = create_engine(
         "sqlite+pysqlite:///:memory:",
         connect_args={
             "check_same_thread": False,
         },
         poolclass=StaticPool,
     )
+
+    Base.metadata.create_all(bind=engine)
+
+    try:
+        yield engine
+    finally:
+        Base.metadata.drop_all(bind=engine)
+        engine.dispose()
+
+
+@pytest.fixture
+def api_client(
+    test_engine: Engine,
+) -> Generator[TestClient, None, None]:
+    """提供测试结束后自动回滚数据库事务的 API 客户端。"""
+    connection = test_engine.connect()
+    transaction = connection.begin()
+
     testing_session_local = sessionmaker(
-        bind=test_engine,
+        bind=connection,
         autoflush=False,
         expire_on_commit=False,
+        join_transaction_mode="rollback_only",
     )
-
-    Base.metadata.create_all(bind=test_engine)
 
     with testing_session_local() as seed_session:
         customer = Customer(
@@ -107,5 +125,8 @@ def api_client() -> Generator[TestClient, None, None]:
             yield client
     finally:
         app.dependency_overrides.pop(get_db, None)
-        Base.metadata.drop_all(bind=test_engine)
-        test_engine.dispose()
+
+        if transaction.is_active:
+            transaction.rollback()
+
+        connection.close()
