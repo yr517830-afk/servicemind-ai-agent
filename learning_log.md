@@ -3099,282 +3099,6 @@ Day 11 已完成工单 API 的创建、查询、更新、分页和筛选，但�
 - [x] Python 依赖检查通过
 - [x] README 已全面更新
 
-# Day 13：后端自动化测试、事务回滚与日志验证
-
-## 今日目标
-
-1. 使用 FastAPI `TestClient` 完善接口自动化测试。
-2. 使用数据库外层事务隔离每个 API 测试。
-3. 确保测试结束后自动回滚种子数据和业务数据。
-4. 使用 pytest `caplog` 验证关键业务日志。
-5. 确保核心 API 至少包含 12 个自动化断言。
-
-## 完成内容
-
-### 1. API 测试数据库结构复用
-
-将 SQLite 内存数据库引擎调整为 session 级 fixture：
-
-```python
-@pytest.fixture(scope="session")
-def test_engine() -> Generator[Engine, None, None]:
-    engine = create_engine(
-        "sqlite+pysqlite:///:memory:",
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
-    )
-
-    Base.metadata.create_all(bind=engine)
-
-    try:
-        yield engine
-    finally:
-        Base.metadata.drop_all(bind=engine)
-        engine.dispose()
-```
-
-整套 API 测试只创建一次数据库结构，避免每个测试反复建表和删表。
-
-### 2. 每个测试使用独立外层事务
-
-每次创建 `api_client` 时开启独立事务：
-
-```python
-connection = test_engine.connect()
-transaction = connection.begin()
-```
-
-测试结束后统一回滚：
-
-```python
-if transaction.is_active:
-    transaction.rollback()
-
-connection.close()
-```
-
-即使 Service 或 Repository 中调用了：
-
-```python
-session.commit()
-```
-
-测试产生的客户、订单和工单数据仍不会污染后续测试。
-
-### 3. 使用 rollback-only 事务连接模式
-
-测试 Session 配置为：
-
-```python
-testing_session_local = sessionmaker(
-    bind=connection,
-    autoflush=False,
-    expire_on_commit=False,
-    join_transaction_mode="rollback_only",
-)
-```
-
-该模式允许业务代码正常调用 `commit()`，但不会提交测试最外层事务，最终仍由 fixture 统一回滚。
-
-### 4. 使用依赖覆盖注入测试 Session
-
-通过 FastAPI 依赖覆盖，让 API 使用测试事务中的数据库 Session：
-
-```python
-def override_get_db() -> Generator[Session, None, None]:
-    with testing_session_local() as session:
-        yield session
-
-app.dependency_overrides[get_db] = override_get_db
-```
-
-测试完成后移除覆盖，防止影响其他测试：
-
-```python
-app.dependency_overrides.pop(get_db, None)
-```
-
-### 5. 增加业务日志自动化测试
-
-使用 pytest `caplog` 捕获 `ticket_core.rules` 的 INFO 日志：
-
-```python
-with caplog.at_level(
-    logging.INFO,
-    logger="ticket_core.rules",
-):
-    decision = decide_ticket(
-        ticket,
-        vip_customer,
-    )
-```
-
-验证日志中包含：
-
-```python
-assert "命中规则=vip" in caplog.text
-assert f"优先级={decision.priority.value}" in caplog.text
-assert f"团队={decision.assigned_team}" in caplog.text
-assert f"SLA={decision.sla_minutes}分钟" in caplog.text
-```
-
-日志测试能够防止关键可观测信息在后续重构中被意外删除。
-
-### 6. 核心 API 断言统计
-
-执行：
-
-```powershell
-(Select-String -Path tests/test_api.py -Pattern '^\s*assert ').Count
-```
-
-结果：
-
-```text
-60
-```
-
-核心 API 的自动化断言数量远高于计划要求的 12 个，覆盖：
-
-- 成功响应状态码和响应字段
-- 工单创建、查询、更新
-- 分页与组合筛选
-- 客户和订单查询
-- 资源不存在的统一 404
-- 请求参数校验 422
-- 空 PATCH 请求 400
-- OpenAPI 响应契约
-
-### 7. 全项目验收
-
-执行：
-
-```powershell
-python -m pytest -q
-ruff check .
-python -m pip check
-docker compose ps
-```
-
-结果：
-
-```text
-35 passed
-All checks passed!
-No broken requirements found.
-PostgreSQL healthy
-```
-
-## 今日遇到的问题
-
-### 问题一：SQLite 保存点没有按预期回滚
-
-最初使用：
-
-```python
-join_transaction_mode="create_savepoint"
-```
-
-第一个测试结束后，种子客户仍然保留在共享内存数据库中。第二个测试再次插入相同邮箱时触发：
-
-```text
-sqlite3.IntegrityError:
-UNIQUE constraint failed: customers.email
-```
-
-将连接模式调整为：
-
-```python
-join_transaction_mode="rollback_only"
-```
-
-之后外层事务可以在每个测试结束时完整清理数据，15 个 API 测试全部通过。
-
-### 问题二：手工修改 fixture 时出现括号和缩进错误
-
-修改 `sessionmaker()` 代码块时曾出现：
-
-```text
-SyntaxError: '(' was never closed
-```
-
-以及：
-
-```text
-IndentationError:
-expected an indented block after 'with' statement
-```
-
-通过先执行：
-
-```powershell
-python -m py_compile tests/conftest.py
-```
-
-可以在运行完整测试前快速检查 Python 语法和缩进。
-
-## 今日收获
-
-1. 理解测试隔离不等于每次重新创建数据库。
-2. 学会使用 session 级 fixture 复用数据库结构。
-3. 学会使用 function 级外层事务隔离每个测试。
-4. 理解业务 `commit()` 与测试外层事务之间的关系。
-5. 学会使用 `join_transaction_mode="rollback_only"`。
-6. 学会通过 FastAPI 依赖覆盖注入测试 Session。
-7. 学会在 fixture 清理阶段恢复依赖并释放连接。
-8. 学会使用 pytest `caplog` 捕获指定 logger。
-9. 学会断言日志中的业务字段，而不仅是日志是否存在。
-10. 学会使用 `py_compile` 快速定位语法和缩进问题。
-11. 学会统计并审查核心 API 的自动化断言。
-
-## 对求职的帮助
-
-Day 13 让项目测试从“接口能够通过”升级为具备数据隔离、事务清理和日志验证的后端测试体系。
-
-能够体现：
-
-- pytest fixture 设计能力
-- FastAPI TestClient 测试能力
-- SQLAlchemy 测试事务管理能力
-- 数据库测试隔离意识
-- FastAPI 依赖覆盖能力
-- API 契约与异常场景测试能力
-- pytest caplog 使用能力
-- 日志可观测性测试意识
-- 测试故障诊断能力
-
-## 面试表达
-
-我为 ServiceMind 的 FastAPI 接口测试建立了共享 SQLite 内存数据库和每测试独立事务机制。数据库结构在整套测试中只创建一次，每个测试通过独立连接开启外层事务，业务代码可以正常调用 `commit()`，但不会提交最外层测试事务，测试结束后统一回滚，因此测试数据不会相互污染。我还使用 pytest `caplog` 验证规则命中、优先级、团队和 SLA 日志。最终 15 个 API 测试、60 个核心 API 断言和全项目 35 个测试全部通过。
-
-## 当前边界
-
-- API 测试目前使用 SQLite，尚未增加 PostgreSQL 集成测试。
-- 尚未统计测试覆盖率。
-- 尚未接入持续集成流水线。
-- 尚未测试并发请求和并发事务。
-- 尚未验证结构化 JSON 日志。
-
-## Day 13 完成情况
-
-- [x] TestClient API 测试正常运行
-- [x] 测试数据库结构完成复用
-- [x] 每个 API 测试使用独立外层事务
-- [x] 测试结束后自动回滚
-- [x] FastAPI 数据库依赖完成覆盖
-- [x] SQLite 唯一数据冲突问题完成修复
-- [x] 使用 `caplog` 验证规则日志
-- [x] 日志测试包含 5 个关键断言
-- [x] 核心 API 包含 60 个断言
-- [x] 15 个 API 测试通过
-- [x] 全项目 35 个测试通过
-- [x] Ruff 全项目检查通过
-- [x] Python 依赖检查通过
-- [x] PostgreSQL 容器健康
-- [x] README 已更新
-
----
-
 # Day 12：客户、订单工具接口与统一 404
 
 日期：2026-07-28
@@ -3906,3 +3630,584 @@ Day 12 已完成客户和订单详情查询，但仍有以下边界：
 - [x] Ruff 全项目检查通过
 - [x] Python 依赖检查通过
 - [x] README 已全面更新
+
+# Day 13：后端自动化测试、事务回滚与日志验证
+
+## 今日目标
+
+1. 使用 FastAPI `TestClient` 完善接口自动化测试。
+2. 使用数据库外层事务隔离每个 API 测试。
+3. 确保测试结束后自动回滚种子数据和业务数据。
+4. 使用 pytest `caplog` 验证关键业务日志。
+5. 确保核心 API 至少包含 12 个自动化断言。
+
+## 完成内容
+
+### 1. API 测试数据库结构复用
+
+将 SQLite 内存数据库引擎调整为 session 级 fixture：
+
+```python
+@pytest.fixture(scope="session")
+def test_engine() -> Generator[Engine, None, None]:
+    engine = create_engine(
+        "sqlite+pysqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+
+    Base.metadata.create_all(bind=engine)
+
+    try:
+        yield engine
+    finally:
+        Base.metadata.drop_all(bind=engine)
+        engine.dispose()
+```
+
+整套 API 测试只创建一次数据库结构，避免每个测试反复建表和删表。
+
+### 2. 每个测试使用独立外层事务
+
+每次创建 `api_client` 时开启独立事务：
+
+```python
+connection = test_engine.connect()
+transaction = connection.begin()
+```
+
+测试结束后统一回滚：
+
+```python
+if transaction.is_active:
+    transaction.rollback()
+
+connection.close()
+```
+
+即使 Service 或 Repository 中调用了：
+
+```python
+session.commit()
+```
+
+测试产生的客户、订单和工单数据仍不会污染后续测试。
+
+### 3. 使用 rollback-only 事务连接模式
+
+测试 Session 配置为：
+
+```python
+testing_session_local = sessionmaker(
+    bind=connection,
+    autoflush=False,
+    expire_on_commit=False,
+    join_transaction_mode="rollback_only",
+)
+```
+
+该模式允许业务代码正常调用 `commit()`，但不会提交测试最外层事务，最终仍由 fixture 统一回滚。
+
+### 4. 使用依赖覆盖注入测试 Session
+
+通过 FastAPI 依赖覆盖，让 API 使用测试事务中的数据库 Session：
+
+```python
+def override_get_db() -> Generator[Session, None, None]:
+    with testing_session_local() as session:
+        yield session
+
+app.dependency_overrides[get_db] = override_get_db
+```
+
+测试完成后移除覆盖，防止影响其他测试：
+
+```python
+app.dependency_overrides.pop(get_db, None)
+```
+
+### 5. 增加业务日志自动化测试
+
+使用 pytest `caplog` 捕获 `ticket_core.rules` 的 INFO 日志：
+
+```python
+with caplog.at_level(
+    logging.INFO,
+    logger="ticket_core.rules",
+):
+    decision = decide_ticket(
+        ticket,
+        vip_customer,
+    )
+```
+
+验证日志中包含：
+
+```python
+assert "命中规则=vip" in caplog.text
+assert f"优先级={decision.priority.value}" in caplog.text
+assert f"团队={decision.assigned_team}" in caplog.text
+assert f"SLA={decision.sla_minutes}分钟" in caplog.text
+```
+
+日志测试能够防止关键可观测信息在后续重构中被意外删除。
+
+### 6. 核心 API 断言统计
+
+执行：
+
+```powershell
+(Select-String -Path tests/test_api.py -Pattern '^\s*assert ').Count
+```
+
+结果：
+
+```text
+60
+```
+
+核心 API 的自动化断言数量远高于计划要求的 12 个，覆盖：
+
+- 成功响应状态码和响应字段
+- 工单创建、查询、更新
+- 分页与组合筛选
+- 客户和订单查询
+- 资源不存在的统一 404
+- 请求参数校验 422
+- 空 PATCH 请求 400
+- OpenAPI 响应契约
+
+### 7. 全项目验收
+
+执行：
+
+```powershell
+python -m pytest -q
+ruff check .
+python -m pip check
+docker compose ps
+```
+
+结果：
+
+```text
+35 passed
+All checks passed!
+No broken requirements found.
+PostgreSQL healthy
+```
+
+## 今日遇到的问题
+
+### 问题一：SQLite 保存点没有按预期回滚
+
+最初使用：
+
+```python
+join_transaction_mode="create_savepoint"
+```
+
+第一个测试结束后，种子客户仍然保留在共享内存数据库中。第二个测试再次插入相同邮箱时触发：
+
+```text
+sqlite3.IntegrityError:
+UNIQUE constraint failed: customers.email
+```
+
+将连接模式调整为：
+
+```python
+join_transaction_mode="rollback_only"
+```
+
+之后外层事务可以在每个测试结束时完整清理数据，15 个 API 测试全部通过。
+
+### 问题二：手工修改 fixture 时出现括号和缩进错误
+
+修改 `sessionmaker()` 代码块时曾出现：
+
+```text
+SyntaxError: '(' was never closed
+```
+
+以及：
+
+```text
+IndentationError:
+expected an indented block after 'with' statement
+```
+
+通过先执行：
+
+```powershell
+python -m py_compile tests/conftest.py
+```
+
+可以在运行完整测试前快速检查 Python 语法和缩进。
+
+## 今日收获
+
+1. 理解测试隔离不等于每次重新创建数据库。
+2. 学会使用 session 级 fixture 复用数据库结构。
+3. 学会使用 function 级外层事务隔离每个测试。
+4. 理解业务 `commit()` 与测试外层事务之间的关系。
+5. 学会使用 `join_transaction_mode="rollback_only"`。
+6. 学会通过 FastAPI 依赖覆盖注入测试 Session。
+7. 学会在 fixture 清理阶段恢复依赖并释放连接。
+8. 学会使用 pytest `caplog` 捕获指定 logger。
+9. 学会断言日志中的业务字段，而不仅是日志是否存在。
+10. 学会使用 `py_compile` 快速定位语法和缩进问题。
+11. 学会统计并审查核心 API 的自动化断言。
+
+## 对求职的帮助
+
+Day 13 让项目测试从“接口能够通过”升级为具备数据隔离、事务清理和日志验证的后端测试体系。
+
+能够体现：
+
+- pytest fixture 设计能力
+- FastAPI TestClient 测试能力
+- SQLAlchemy 测试事务管理能力
+- 数据库测试隔离意识
+- FastAPI 依赖覆盖能力
+- API 契约与异常场景测试能力
+- pytest caplog 使用能力
+- 日志可观测性测试意识
+- 测试故障诊断能力
+
+## 面试表达
+
+我为 ServiceMind 的 FastAPI 接口测试建立了共享 SQLite 内存数据库和每测试独立事务机制。数据库结构在整套测试中只创建一次，每个测试通过独立连接开启外层事务，业务代码可以正常调用 `commit()`，但不会提交最外层测试事务，测试结束后统一回滚，因此测试数据不会相互污染。我还使用 pytest `caplog` 验证规则命中、优先级、团队和 SLA 日志。最终 15 个 API 测试、60 个核心 API 断言和全项目 35 个测试全部通过。
+
+## 当前边界
+
+- API 测试目前使用 SQLite，尚未增加 PostgreSQL 集成测试。
+- 尚未统计测试覆盖率。
+- 尚未接入持续集成流水线。
+- 尚未测试并发请求和并发事务。
+- 尚未验证结构化 JSON 日志。
+
+## Day 13 完成情况
+
+- [x] TestClient API 测试正常运行
+- [x] 测试数据库结构完成复用
+- [x] 每个 API 测试使用独立外层事务
+- [x] 测试结束后自动回滚
+- [x] FastAPI 数据库依赖完成覆盖
+- [x] SQLite 唯一数据冲突问题完成修复
+- [x] 使用 `caplog` 验证规则日志
+- [x] 日志测试包含 5 个关键断言
+- [x] 核心 API 包含 60 个断言
+- [x] 15 个 API 测试通过
+- [x] 全项目 35 个测试通过
+- [x] Ruff 全项目检查通过
+- [x] Python 依赖检查通过
+- [x] PostgreSQL 容器健康
+- [x] README 已更新
+
+---
+
+# Day 14：Docker 一键交付与技术文档
+
+## 今日目标
+
+1. 将 FastAPI 应用构建为 Docker 镜像。
+2. 使用 Docker Compose 同时启动 PostgreSQL 和 API。
+3. 为数据库与 API 配置健康检查和启动顺序。
+4. 补充独立 API 文档和数据库 ER 图。
+5. 让其他开发者能够通过一条命令启动完整后端。
+
+## 完成内容
+
+### 1. 创建 FastAPI Docker 镜像
+
+新增 `Dockerfile`，使用：
+
+```dockerfile
+FROM python:3.14-slim
+```
+
+镜像完成以下工作：
+
+- 关闭 `.pyc` 文件生成。
+- 开启 Python 无缓冲输出。
+- 安装锁定版本的项目依赖。
+- 复制 FastAPI 应用、配置和脚本。
+- 创建数据与日志目录。
+- 使用非 root 用户运行服务。
+- 暴露容器的 8000 端口。
+- 使用 Uvicorn 启动 `app.main:app`。
+
+构建命令：
+
+```powershell
+docker build -t servicemind-api:day14 .
+```
+
+镜像验证：
+
+```powershell
+docker image inspect servicemind-api:day14 --format "{{.RepoTags}}"
+```
+
+结果：
+
+```text
+[servicemind-api:day14]
+```
+
+### 2. 创建 Docker 构建排除规则
+
+新增 `.dockerignore`，排除：
+
+- Git 与 IDE 配置。
+- Python 虚拟环境。
+- pytest、Ruff 和覆盖率缓存。
+- `.env` 敏感配置。
+- SQLite 数据库文件。
+- 本地日志和运行数据。
+- 测试及学习记录。
+
+这样可以缩小构建上下文，并避免把数据库密码和本地文件复制进镜像。
+
+### 3. Compose 同时编排数据库与 API
+
+`compose.yaml` 从单一 PostgreSQL 服务扩展为：
+
+```text
+Docker Compose
+├── postgres
+└── api
+```
+
+API 使用以下容器网络地址连接数据库：
+
+```text
+postgresql+psycopg://用户:密码@postgres:5432/servicemind
+```
+
+容器之间通过 Compose 服务名 `postgres` 通信，不能使用 `localhost`。
+
+### 4. 控制容器启动顺序
+
+API 配置：
+
+```yaml
+depends_on:
+  postgres:
+    condition: service_healthy
+```
+
+只有 PostgreSQL 通过健康检查后，API 才会执行初始化和启动命令。
+
+### 5. 自动初始化数据库
+
+API 容器启动时依次执行：
+
+```text
+创建 ORM 数据表
+→ 执行幂等种子脚本
+→ 启动 Uvicorn
+```
+
+因此全新环境不需要先在宿主机手动执行建表脚本。
+
+### 6. API 容器健康检查
+
+API 通过 Python 标准库请求：
+
+```text
+http://127.0.0.1:8000/health
+```
+
+避免依赖精简镜像中可能不存在的 `curl` 命令。
+
+### 7. Docker 一键启动
+
+执行：
+
+```powershell
+docker compose up --build -d
+```
+
+验收结果：
+
+```text
+servicemind-api        healthy
+servicemind-postgres   healthy
+```
+
+对外端口：
+
+```text
+API:        8000
+PostgreSQL: 5432
+```
+
+### 8. 容器化 API 验收
+
+验证：
+
+```powershell
+Invoke-RestMethod -Uri "http://127.0.0.1:8000/health"
+```
+
+返回：
+
+```json
+{
+  "status": "ok",
+  "service": "ServiceMind"
+}
+```
+
+Swagger UI 返回 HTTP 200：
+
+```text
+http://127.0.0.1:8000/docs
+```
+
+分页查询成功：
+
+```text
+GET /tickets?page=1&page_size=2
+HTTP 200
+```
+
+API 日志中不存在 Traceback 或数据库连接错误。
+
+### 9. 补充 API 文档
+
+新增 `docs/api.md`，包含：
+
+- Docker 启动与停止命令。
+- 服务访问地址。
+- 全部接口列表。
+- 创建、查询和更新示例。
+- 分页与组合筛选参数。
+- 统一资源错误格式。
+- 自动化验证命令。
+
+### 10. 补充数据库 ER 图
+
+新增 `docs/er-diagram.md`，使用 Mermaid 描述：
+
+```text
+Customer 1 ── N Order
+Customer 1 ── N Ticket
+Order    0..1 ── N Ticket
+```
+
+文档同时记录主键、唯一约束、外键、索引和 SQLAlchemy 双向关系。
+
+### 11. 更新 README 首页
+
+README 首页新增：
+
+- Docker 一键启动步骤。
+- 两个容器的健康状态。
+- Swagger、健康检查和 OpenAPI 地址。
+- API 文档与 ER 图入口。
+- Day 13 与 Day 14 进度。
+- 最新项目目录结构。
+
+## 今日遇到的问题
+
+### 问题一：Dockerfile 多行 CMD 解析失败
+
+最初将 JSON 格式的 `CMD` 直接拆成多行，Docker 报错：
+
+```text
+unknown instruction: "uvicorn",
+```
+
+修改为单行 JSON 数组后构建成功：
+
+```dockerfile
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+```
+
+### 问题二：容器中不能使用 localhost 连接数据库
+
+API 与 PostgreSQL 位于不同容器。API 容器中的 `localhost` 指向 API 自身，因此数据库主机必须使用 Compose 服务名：
+
+```text
+postgres
+```
+
+### 问题三：启动容器不会自动打开浏览器
+
+Docker Compose 只启动后台服务，不会弹出网页。Swagger 需要手动访问：
+
+```text
+http://127.0.0.1:8000/docs
+```
+
+项目当前没有独立前端首页。
+
+### 问题四：PowerShell 显示中文乱码
+
+Windows PowerShell 5.1 可能错误解码不带 charset 的 UTF-8 JSON。服务、数据库和浏览器 Swagger 实际运行正常，该现象不属于容器故障。
+
+## 今日收获
+
+1. 学会编写 Python FastAPI Dockerfile。
+2. 理解 Docker 构建上下文和 `.dockerignore`。
+3. 学会避免将 `.env` 复制进镜像。
+4. 学会使用非 root 用户运行容器。
+5. 学会使用 Docker Compose 编排多个服务。
+6. 理解容器服务名和 localhost 的区别。
+7. 学会使用健康检查控制服务启动顺序。
+8. 学会在容器启动阶段初始化数据库。
+9. 学会使用 Compose 日志诊断 API。
+10. 学会编写独立 API 使用文档。
+11. 学会使用 Mermaid 描述数据库 ER 关系。
+
+## 对求职的帮助
+
+Day 14 让项目从“开发者本机可以运行”升级为“其他人克隆后可以使用 Docker 一键启动”。
+
+能够体现：
+
+- Docker 镜像构建能力
+- Docker Compose 多服务编排能力
+- 容器网络与环境变量配置能力
+- 健康检查和启动依赖设计能力
+- FastAPI 容器化部署能力
+- PostgreSQL 容器化能力
+- API 文档维护能力
+- 数据库 ER 建模表达能力
+- 可复现交付意识
+
+## 面试表达
+
+我为 ServiceMind 编写了 Python 3.14 Docker 镜像，并使用 Docker Compose 同时编排 FastAPI 和 PostgreSQL。API 通过 Compose 服务名访问数据库，并通过 `depends_on` 等待 PostgreSQL 健康后再创建数据表、执行幂等种子脚本并启动 Uvicorn。两个服务都有独立健康检查，其他开发者只需执行 `docker compose up --build -d` 就能启动完整后端。我还补充了 API 使用文档和 Mermaid ER 图，使仓库具备可复现启动和快速理解能力。
+
+## 当前边界
+
+- 当前使用 ORM `create_all()` 初始化表，尚未接入 Alembic 数据库迁移。
+- API 容器使用 Uvicorn 单进程，尚未配置生产级进程管理。
+- 尚未实现独立前端页面。
+- 尚未配置 HTTPS 和反向代理。
+- 尚未建立 CI/CD 自动构建与部署。
+- 尚未接入大模型、RAG 和 Agent。
+
+## Day 14 完成情况
+
+- [x] 创建 FastAPI Dockerfile
+- [x] 使用 Python 3.14 slim 基础镜像
+- [x] 使用非 root 用户运行 API
+- [x] 创建 `.dockerignore`
+- [x] `.env` 未进入 Docker 镜像
+- [x] Compose 新增 API 服务
+- [x] API 通过服务名连接 PostgreSQL
+- [x] PostgreSQL 健康后启动 API
+- [x] 自动创建数据库表
+- [x] 自动执行幂等种子脚本
+- [x] PostgreSQL 健康检查通过
+- [x] API 健康检查通过
+- [x] Swagger 返回 HTTP 200
+- [x] 容器化分页查询通过
+- [x] 新增 API 使用文档
+- [x] 新增 Mermaid ER 图
+- [x] README 一键启动说明已更新

@@ -1,8 +1,66 @@
 # ServiceMind AI Agent
 
 ServiceMind 是一个使用 Python 和 FastAPI 开发的智能客服工单系统。
-项目支持客户输入校验、工单优先级判断、处理团队分配、SLA 计算、CLI 操作和 HTTP API。目前保留 SQLite 作为第一阶段 CLI 数据库，同时使用 Docker、PostgreSQL 和 SQLAlchemy 支撑 FastAPI 工单 CRUD。
+项目支持客户输入校验、工单优先级判断、处理团队分配、SLA 计算、CLI 操作和 HTTP API。目前保留 SQLite 作为第一阶段 CLI 数据库，同时使用 Docker Compose、PostgreSQL 和 SQLAlchemy 支撑 FastAPI 工单 CRUD，数据库与 API 均可通过 Docker 一键启动。
 当前 FastAPI 已通过 Service 和 Repository 正式连接 PostgreSQL，支持工单创建、查询、部分更新、分页和组合筛选，以及客户与订单详情查询；创建与关键字段更新会自动调用第一周规则引擎，所有资源不存在错误使用统一 404 响应。
+
+## Docker 一键启动
+
+### 1. 创建本地配置
+
+```powershell
+Copy-Item .env.example .env
+```
+
+请根据本机环境修改 `.env` 中的数据库密码。
+
+### 2. 启动数据库与 API
+
+```powershell
+docker compose up --build -d
+```
+
+Compose 会自动完成：
+
+1. 构建 FastAPI Docker 镜像。
+2. 启动 PostgreSQL。
+3. 等待 PostgreSQL 健康检查通过。
+4. 创建数据库表。
+5. 插入幂等演示数据。
+6. 启动 FastAPI。
+7. 检查 API 健康状态。
+
+### 3. 检查服务
+
+```powershell
+docker compose ps
+```
+
+正常状态：
+
+```text
+servicemind-api        healthy
+servicemind-postgres   healthy
+```
+
+### 4. 访问服务
+
+- Swagger UI：<http://127.0.0.1:8000/docs>
+- 健康检查：<http://127.0.0.1:8000/health>
+- OpenAPI JSON：<http://127.0.0.1:8000/openapi.json>
+
+### 5. 停止服务
+
+```powershell
+docker compose down
+```
+
+PostgreSQL 数据保存在 Docker 命名卷中，普通 `down` 不会删除数据。
+
+## 技术文档
+
+- [API 使用文档](docs/api.md)
+- [数据库 ER 图](docs/er-diagram.md)
 
 ## 当前学习进度
 
@@ -246,6 +304,34 @@ PostgreSQL 17
 }
 ```
 
+### Day 13：后端测试、事务回滚与日志验证
+
+- 将 SQLite 内存数据库引擎调整为 session 级测试 fixture
+- 每个 API 测试使用独立连接和外层事务
+- 使用 `join_transaction_mode="rollback_only"` 兼容业务代码中的 `commit()`
+- 测试结束后自动回滚种子数据和业务数据
+- 使用 FastAPI 依赖覆盖注入测试 Session
+- 使用 pytest `caplog` 验证规则命中日志
+- 日志测试覆盖规则名、优先级、处理团队和 SLA
+- 15 个 API 测试包含 60 个自动化断言
+- 全项目 35 个 pytest 测试通过
+- Ruff 与 Python 依赖检查通过
+
+### Day 14：Docker 一键交付与技术文档
+
+- 创建 Python 3.14 FastAPI Docker 镜像
+- 使用非 root 用户运行 API 容器
+- 使用 `.dockerignore` 排除虚拟环境、缓存、日志和敏感配置
+- 扩展 Docker Compose，同时编排 PostgreSQL 与 FastAPI
+- API 容器通过服务名 `postgres` 访问数据库
+- PostgreSQL 健康后再启动 API
+- 容器启动时自动创建数据库表并执行幂等种子脚本
+- 为 PostgreSQL 和 API 配置独立健康检查
+- `docker compose up --build -d` 可一键启动完整后端
+- Swagger、健康检查和分页查询完成容器化验收
+- 新增独立 API 使用文档
+- 新增 Mermaid 数据库 ER 图
+
 
 ## 项目结构
 
@@ -289,6 +375,9 @@ servicemind-ai-agent/
 │   └── main.py
 ├── config/
 │   └── routing_rules.json
+├── docs/
+│   ├── api.md
+│   └── er-diagram.md
 ├── scripts/
 │   ├── __init__.py
 │   ├── query_database.py
@@ -309,9 +398,11 @@ servicemind-ai-agent/
 │   ├── repository.py
 │   ├── rules.py
 │   └── validators.py
+├── .dockerignore
 ├── .env.example
 ├── .gitignore
 ├── compose.yaml
+├── Dockerfile
 ├── day1_python_review.py
 ├── learning_log.md
 ├── README.md
