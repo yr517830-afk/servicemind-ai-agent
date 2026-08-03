@@ -6,6 +6,7 @@ services:
       POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+
     ports:
       - "5432:5432"
     volumes:
@@ -22,12 +23,17 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: servicemind-api:day14
+    image: servicemind-api:day15
     container_name: servicemind-api
     environment:
       DEBUG: "false"
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       ROUTING_RULES_PATH: config/routing_rules.json
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-5.6-sol}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.openai.com/v1}
+      OPENAI_TIMEOUT_SECONDS: ${OPENAI_TIMEOUT_SECONDS:-20}
+      OPENAI_MAX_RETRIES: ${OPENAI_MAX_RETRIES:-1}
     ports:
       - "8000:8000"
     depends_on:

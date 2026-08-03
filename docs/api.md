@@ -34,18 +34,52 @@ docker compose down
 - Swagger UI：`http://127.0.0.1:8000/docs`
 - OpenAPI JSON：`http://127.0.0.1:8000/openapi.json`
 - 健康检查：`http://127.0.0.1:8000/health`
+- LLM 配置健康检查：`http://127.0.0.1:8000/health/llm`
 
 ## 接口列表
 
 | 方法 | 路径 | 功能 | 成功状态码 |
 |---|---|---|---:|
 | GET | `/health` | 服务健康检查 | 200 |
+| GET | `/health/llm` | 检查 LLM 客户端配置状态 | 200 |
 | POST | `/tickets` | 创建工单并执行路由规则 | 201 |
 | GET | `/tickets` | 分页及组合筛选工单 | 200 |
 | GET | `/tickets/{ticket_id}` | 查询工单详情 | 200 |
 | PATCH | `/tickets/{ticket_id}` | 部分更新工单并重新计算规则 | 200 |
 | GET | `/customers/{customer_id}` | 查询客户详情 | 200 |
 | GET | `/orders/{order_id}` | 查询订单详情 | 200 |
+
+## LLM 配置健康检查
+
+```http
+GET /health/llm
+```
+
+无 API Key 时：
+
+```json
+{
+  "status": "not_configured",
+  "configured": false,
+  "model": "gpt-5.6-sol",
+  "timeout_seconds": 20.0,
+  "max_retries": 1
+}
+```
+
+该接口只检查本地配置，不会向模型服务发送请求，不会消耗 Token，也不会返回 API Key。
+
+LLM 配置通过以下环境变量提供：
+
+```dotenv
+OPENAI_API_KEY=
+OPENAI_MODEL=gpt-5.6-sol
+OPENAI_BASE_URL=https://api.openai.com/v1
+OPENAI_TIMEOUT_SECONDS=20
+OPENAI_MAX_RETRIES=1
+```
+
+真实 API Key 只能写入本地 `.env`，不能提交到 Git。
 
 ## 创建工单
 

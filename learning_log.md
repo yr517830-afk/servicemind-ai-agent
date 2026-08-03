@@ -4211,3 +4211,163 @@ Day 14 让项目从“开发者本机可以运行”升级为“其他人克隆�
 - [x] 新增 API 使用文档
 - [x] 新增 Mermaid ER 图
 - [x] README 一键启动说明已更新
+
+# Day 15：LLM API 客户端与容错处理
+
+## 今日目标
+
+1. 安装并配置 OpenAI Python SDK。
+2. 使用环境变量安全管理 API Key。
+3. 封装独立 LLM 客户端。
+4. 实现超时和常见 API 异常映射。
+5. 保证无密钥时服务仍能正常运行。
+6. 使用 Mock 完成不消耗 Token 的自动化测试。
+7. 将 LLM 配置接入 Docker Compose。
+
+## 完成内容
+
+### 1. LLM 环境配置
+
+新增以下配置：
+
+- `OPENAI_API_KEY`
+- `OPENAI_MODEL`
+- `OPENAI_BASE_URL`
+- `OPENAI_TIMEOUT_SECONDS`
+- `OPENAI_MAX_RETRIES`
+
+真实密钥只保存在被 Git 忽略的 `.env` 中，`.env.example` 仅保留空白模板。
+
+### 2. LLM 客户端封装
+
+新增 `app/clients/llm_client.py`，统一封装 OpenAI Responses API。
+
+客户端提供：
+
+- 配置状态检查
+- 文本生成
+- 请求超时控制
+- 自动重试次数控制
+- 统一异常映射
+- 空响应校验
+
+### 3. 无密钥安全启动
+
+未配置 API Key 时，客户端不会创建真实 SDK 连接，FastAPI 和 Docker 容器仍可正常启动。
+
+健康状态返回：
+
+```json
+{
+  "status": "not_configured",
+  "configured": false,
+  "model": "gpt-5.6-sol",
+  "timeout_seconds": 20.0,
+  "max_retries": 1
+}
+```
+
+### 4. 异常映射
+
+将 SDK 异常转换为项目内部异常：
+
+| SDK 情况 | 项目异常 |
+|---|---|
+| 未配置密钥 | `LLMNotConfiguredError` |
+| 请求超时 | `LLMTimeoutError` |
+| 请求限流 | `LLMRateLimitError` |
+| 认证失败 | `LLMAuthenticationError` |
+| 连接失败 | `LLMUnavailableError` |
+| API 状态异常 | `LLMUnavailableError` |
+| 返回空文本 | `LLMUnavailableError` |
+
+不直接向上层返回 SDK 原始异常，降低敏感信息泄露风险。
+
+### 5. LLM 健康检查
+
+新增：
+
+```http
+GET /health/llm
+```
+
+该接口只读取本地配置，不调用真实模型、不消耗 Token，也不返回 API Key。
+
+### 6. Docker 集成
+
+Docker Compose 在容器运行阶段传入 LLM 配置，API 镜像升级为：
+
+```text
+servicemind-api:day15
+```
+
+API 和 PostgreSQL 容器健康检查均通过。
+
+### 7. 自动化测试
+
+新增 7 个 LLM 客户端测试，覆盖：
+
+- 无密钥安全行为
+- 正常文本响应
+- 超时异常
+- 限流异常
+- 认证异常
+- 连接异常
+- 空响应异常
+
+新增 1 个 LLM 健康接口测试，验证响应中不包含 API Key。
+
+最终结果：
+
+```text
+43 passed
+All checks passed!
+No broken requirements found.
+```
+
+## 今日遇到的问题
+
+### PowerShell 嵌套引号冲突
+
+使用 `python -c` 测试多行 `try/except` 时，PowerShell 与 Python 字符串引号发生冲突。
+
+最终改用 pytest 编写正式测试，避免复杂终端转义，并使测试可以持续重复执行。
+
+## 今日收获
+
+1. 理解 API Key 不能写入代码或提交到 Git。
+2. 学会封装独立 LLM 客户端。
+3. 学会使用 Responses API。
+4. 学会配置请求超时和重试。
+5. 学会将第三方 SDK 异常转换为业务异常。
+6. 学会在无密钥状态下保持服务可用。
+7. 学会使用 Mock 测试第三方 API。
+8. 学会避免测试消耗真实 Token。
+9. 学会将 LLM 配置安全传入 Docker 容器。
+
+## 面试表达
+
+我在 ServiceMind 中封装了独立的 LLM 客户端，通过环境变量管理 API Key、模型、服务地址、超时和重试配置。客户端使用统一异常体系处理未配置、超时、限流、认证和连接失败等场景，避免第三方 SDK 异常或敏感信息直接暴露给上层。测试使用 Mock 模拟模型响应和异常，不依赖网络，也不会消耗真实 Token。即使没有配置 API Key，FastAPI 和 Docker 服务仍可正常启动并通过健康检查。
+
+## 当前边界
+
+- 当前尚未把 LLM 文本生成接入具体工单业务。
+- 当前未配置真实 API Key，因此未进行真实模型调用。
+- 当前健康检查只验证本地配置，不探测远程模型服务。
+- 当前尚未实现结构化输出、流式响应和 Token 用量统计。
+
+## Day 15 完成情况
+
+- [x] 安装 OpenAI Python SDK
+- [x] 使用环境变量管理 LLM 配置
+- [x] API Key 未写入代码
+- [x] 封装 LLM 客户端
+- [x] 实现无密钥安全行为
+- [x] 实现超时与异常映射
+- [x] 新增 LLM 健康检查
+- [x] Docker Compose 接入 LLM 配置
+- [x] 新增 8 个自动化测试
+- [x] 全项目 43 个测试通过
+- [x] Ruff 检查通过
+- [x] Python 依赖检查通过
+- [x] API 与 PostgreSQL 容器健康

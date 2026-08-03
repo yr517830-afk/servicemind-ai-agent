@@ -47,6 +47,7 @@ servicemind-postgres   healthy
 
 - Swagger UI：<http://127.0.0.1:8000/docs>
 - 健康检查：<http://127.0.0.1:8000/health>
+- LLM 配置健康检查：<http://127.0.0.1:8000/health/llm>
 - OpenAPI JSON：<http://127.0.0.1:8000/openapi.json>
 
 ### 5. 停止服务
@@ -332,6 +333,22 @@ PostgreSQL 17
 - 新增独立 API 使用文档
 - 新增 Mermaid 数据库 ER 图
 
+### Day 15：LLM API 客户端与容错处理
+
+- 安装 OpenAI Python SDK 2.52.0
+- 使用环境变量管理 API Key、模型、地址、超时和重试次数
+- 封装 OpenAI Responses API 客户端
+- 未配置 API Key 时服务仍可正常启动
+- 实现超时、限流、认证失败、连接失败和服务异常映射
+- 底层异常不会直接暴露给 API 用户
+- 新增 `GET /health/llm` 配置健康检查
+- 健康检查不会调用模型或消耗 Token
+- Docker Compose 支持运行时传入 LLM 配置
+- 使用 Mock 测试，不依赖网络和真实 API Key
+- 新增 8 个 LLM 相关自动化测试
+- 全项目 43 个 pytest 测试通过
+- Ruff 与 Python 依赖检查通过
+
 
 ## 项目结构
 
@@ -346,6 +363,9 @@ servicemind-ai-agent/
 │   │       ├── health.py
 │   │       ├── orders.py
 │   │       └── tickets.py
+│   ├── clients/
+│   │   ├── __init__.py
+│   │   └── llm_client.py
 │   ├── core/
 │   │   ├── __init__.py
 │   │   ├── config.py
@@ -386,6 +406,7 @@ servicemind-ai-agent/
 │   ├── conftest.py
 │   ├── test_api.py
 │   ├── test_config.py
+│   ├── test_llm_client.py
 │   ├── test_models.py
 │   ├── test_rules.py
 │   └── test_validators.py
@@ -426,6 +447,7 @@ servicemind-ai-agent/
 - PostgreSQL 17
 - SQLAlchemy 2.0.51
 - psycopg 3.3.4
+- OpenAI Python SDK 2.52.0
 
 ## 安装步骤
 

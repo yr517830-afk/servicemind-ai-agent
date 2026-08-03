@@ -1,5 +1,7 @@
 from fastapi.testclient import TestClient
+from pytest import MonkeyPatch
 
+from app.clients.llm_client import LLMClient
 
 def _create_ticket(
     api_client: TestClient,
@@ -34,6 +36,28 @@ def test_health_check(
         "service": "ServiceMind",
     }
 
+def test_llm_health_without_api_key(
+    api_client: TestClient,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    client = LLMClient(api_key="")
+    monkeypatch.setattr(
+        "app.api.routes.health.llm_client",
+        client,
+    )
+
+    response = api_client.get("/health/llm")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "status": "not_configured",
+        "configured": False,
+        "model": "gpt-5.6-sol",
+        "timeout_seconds": 20.0,
+        "max_retries": 1,
+    }
+    assert "api_key" not in response.text.lower()
+    assert "test-key" not in response.text
 
 def test_create_ticket_runs_vip_rule(
     api_client: TestClient,
