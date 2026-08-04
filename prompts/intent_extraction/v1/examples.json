@@ -1,0 +1,29 @@
+[
+  {
+    "input": "查询订单 SM-20260727-001 的物流进度",
+    "output": {
+      "intent": "logistics",
+      "order_number": "SM-20260727-001",
+      "risk": "low",
+      "confidence_reason": "客户正在查询指定订单的物流进度。"
+    }
+  },
+  {
+    "input": "发现一笔不是我本人支付的订单",
+    "output": {
+      "intent": "account_security",
+      "order_number": null,
+      "risk": "high",
+      "confidence_reason": "客户报告未授权支付，存在账户和资金安全风险。"
+    }
+  },
+  {
+    "input": "我不知道怎么描述这个问题",
+    "output": {
+      "intent": "other",
+      "order_number": null,
+      "risk": "unknown",
+      "confidence_reason": "消息信息不足，无法判断具体意图和风险。"
+    }
+  }
+]

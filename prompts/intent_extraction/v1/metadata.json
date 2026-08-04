@@ -1,0 +1,9 @@
+{
+  "name": "intent_extraction",
+  "version": "v1",
+  "purpose": "从客户消息中提取意图、订单号、风险等级和判断依据",
+  "model_family": "gpt-5.6",
+  "output_schema": "IntentExtraction",
+  "created_at": "2026-08-04",
+  "notes": "Day16 已验证的基线 Prompt"
+}

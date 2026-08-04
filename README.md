@@ -791,3 +791,14 @@ ServiceMind 支持通过 OpenAI Responses API 将客户消息提取为经过 Pyd
 
 结构化输出相关测试使用 Mock 模拟模型响应，不调用真实 API，也不消耗 Token。当前全项目共有 62 个 pytest 自动化测试。
 
+## Prompt 版本管理与评估
+
+意图提取 Prompt 已从业务代码中分离到 `prompts/intent_extraction/`，每个版本独立保存 system prompt、few-shot 示例和元数据。当前提供：
+
+- `v1`：Day16 验证过的基线 Prompt，包含 3 条示例。
+- `v2`：增加分类优先级、安全边界和提示注入示例，包含 5 条示例。
+
+`IntentService` 可通过版本号切换 Prompt；加载器会校验版本格式、元数据、输出 Schema 和示例内容，并缓存已经加载的版本。`scripts/compare_intent_prompts.py` 使用同一批 15 条样本进行对比，默认执行不产生 API 请求的 dry-run；只有显式指定 `--live` 且配置 API Key 后才会调用真实模型。
+
+当前全项目共有 77 个 pytest 自动化测试。由于尚未配置真实 API Key，目前只验证了版本切换、Prompt 渲染和评估流程，未宣称 v2 的真实模型准确率高于 v1。
+

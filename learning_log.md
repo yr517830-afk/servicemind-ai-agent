@@ -4475,3 +4475,146 @@ No broken requirements found.
 - [x] Ruff 检查通过
 - [x] Python 依赖检查通过
 - [x] Docker Compose 配置检查通过
+
+# Day 17：Prompt 版本化与同批样本对比
+
+## 今日目标
+
+1. 将 system prompt 和 few-shot 示例从业务代码移到 `prompts/`。
+2. 为每个 Prompt 记录版本号、用途、模型家族和输出结构。
+3. 支持在不修改业务代码的情况下切换 v1/v2。
+4. 使用同一批 15 条样本对比两个 Prompt 版本。
+5. 在没有 API Key 时安全执行 dry-run，不产生真实 API 请求。
+
+## 完成内容
+
+### 1. Prompt 目录结构
+
+新增两个独立版本：
+
+```text
+prompts/intent_extraction/
+├── v1/
+│   ├── metadata.json
+│   ├── system.md
+│   └── examples.json
+└── v2/
+    ├── metadata.json
+    ├── system.md
+    └── examples.json
+```
+
+v1 是 Day16 使用的基线 Prompt，包含 3 条 few-shot 示例。v2 精简重复指令，并明确账号安全、支付、物流、订单状态、退款、投诉和其他意图之间的分类优先级，包含 5 条示例。
+
+### 2. Prompt 元数据
+
+每个版本记录：
+
+- Prompt 名称和版本号
+- 业务用途
+- 适用模型家族
+- 输出 Pydantic Schema
+- 创建日期
+- 来源版本和修改说明
+
+### 3. Prompt 加载器
+
+新增 `app/prompts/loader.py`，提供：
+
+- 可用版本发现
+- metadata、system prompt 和 examples 加载
+- Pydantic 数据校验
+- 版本号与元数据一致性校验
+- 输出结构校验
+- 非法版本和路径穿越拦截
+- `lru_cache` 磁盘读取缓存
+
+### 4. IntentService 版本切换
+
+`IntentService` 新增 `prompt_version` 参数，默认使用 v2，也可以显式切换到 v1：
+
+```python
+IntentService(prompt_version="v1")
+IntentService(prompt_version="v2")
+```
+
+Service 会把对应版本的 system prompt、few-shot 示例和当前客户消息组合为模型输入，不再维护硬编码 Prompt。
+
+### 5. 同批样本评估
+
+新增 `evals/intent_extraction_samples.json`，包含 15 条固定样本以及预期意图、订单号和风险等级。
+
+新增 `scripts/compare_intent_prompts.py`：
+
+- 默认 dry-run，不调用真实模型。
+- v1/v2 使用完全相同的样本集。
+- 可单独选择一个或多个版本。
+- 显示示例数量、system prompt 长度和平均模型输入长度。
+- 配置 API Key 后可显式使用 `--live` 比较关键字段准确率。
+
+本次 dry-run 结果：
+
+```text
+samples: 15
+v1: examples=3, system_chars=256, average_input_chars=521.8
+v2: examples=5, system_chars=577, average_input_chars=853.8
+```
+
+v2 提供了更明确的分类边界，但输入更长。由于没有执行真实模型调用，目前不能判断 v2 的真实准确率是否高于 v1。
+
+### 6. 自动化测试
+
+新增测试覆盖：
+
+- v1/v2 加载和元数据校验
+- few-shot 输出结构校验
+- 可用版本列表
+- Prompt 缓存
+- 非法版本和路径穿越拦截
+- IntentService 版本切换
+- few-shot 与当前消息渲染
+- 15 条评估数据读取
+- dry-run 同时使用两个版本
+
+最终检查结果：
+
+```text
+77 passed
+All checks passed!
+No broken requirements found.
+```
+
+## 今日收获
+
+1. 理解 Prompt 应作为可版本管理的工程资产，而不是散落在业务代码中的字符串。
+2. 学会为 Prompt 保存用途、版本、输出契约和变更说明。
+3. 学会使用同一评估集进行受控版本对比。
+4. 学会将 Prompt 变化与模型变化分开，避免混淆评估结果。
+5. 理解 Prompt 更长不等于效果更好，必须通过真实评估验证。
+6. 学会设计默认不产生费用、需要显式授权才能调用真实模型的评估脚本。
+
+## 面试表达
+
+我将意图提取 Prompt 从 Service 代码中拆分为独立的版本化资产，每个版本保存 system prompt、few-shot 示例、用途和输出 Schema。应用通过经过校验的加载器切换 v1/v2，并使用同一批 15 条样本进行受控比较。评估脚本默认只做 dry-run，避免误调用付费 API；配置密钥后才允许显式执行真实模型准确率测试。这样可以追踪 Prompt 变更、复现实验并避免凭主观感觉升级 Prompt。
+
+## 当前边界
+
+- 当前尚未配置真实 API Key，因此没有执行 30 次真实模型请求。
+- dry-run 只能比较 Prompt 结构、示例数量和输入长度，不能证明真实语义准确率。
+- 当前准确率只比较意图、订单号和风险三个关键字段，不评价置信说明文本质量。
+- 当前评估结果只打印到终端，尚未持久化为 JSON 或数据库记录。
+
+## Day 17 完成情况
+
+- [x] 创建 Prompt v1 和 v2
+- [x] system prompt 移出业务代码
+- [x] few-shot 示例移出业务代码
+- [x] 记录版本号、用途和输出结构
+- [x] 实现 Prompt 加载与缓存
+- [x] 拦截非法版本和路径穿越
+- [x] IntentService 支持 v1/v2 切换
+- [x] 建立 15 条固定评估样本
+- [x] 实现安全 dry-run 对比脚本
+- [x] 完成 Prompt 版本化自动化测试
+- [x] 全项目 77 项测试通过
+- [x] Ruff、依赖和 Compose 配置检查通过

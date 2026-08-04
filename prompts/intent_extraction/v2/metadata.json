@@ -1,0 +1,10 @@
+{
+  "name": "intent_extraction",
+  "version": "v2",
+  "purpose": "使用明确的分类优先级提取客服消息意图、订单号和风险",
+  "model_family": "gpt-5.6",
+  "output_schema": "IntentExtraction",
+  "created_at": "2026-08-04",
+  "based_on": "v1",
+  "notes": "精简重复指令，增加安全、支付、物流与投诉的分类边界"
+}
