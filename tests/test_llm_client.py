@@ -18,6 +18,7 @@ from app.clients.llm_client import (
     LLMUnavailableError,
 )
 
+from app.schemas.intent import IntentExtraction, IntentType, RiskLevel
 
 def configured_client() -> LLMClient:
     """创建不会实际联网的已配置客户端。"""
@@ -136,5 +137,48 @@ def test_llm_client_rejects_empty_response() -> None:
 
     with pytest.raises(LLMUnavailableError) as error:
         client.generate_text("测试空响应")
+
+    assert error.value.code == "LLM_UNAVAILABLE"
+
+def test_llm_client_parses_structured_response() -> None:
+    client = configured_client()
+    sdk = attach_mock_sdk(client)
+    parsed_result = IntentExtraction(
+        intent=IntentType.LOGISTICS,
+        order_number="SM-20260727-001",
+        risk=RiskLevel.LOW,
+        confidence_reason="客户正在查询物流进度。",
+    )
+    sdk.responses.parse.return_value = Mock(
+        output_parsed=parsed_result,
+    )
+
+    result = client.parse_structured(
+        "查询订单 SM-20260727-001 的物流进度",
+        response_model=IntentExtraction,
+        instructions="提取客户消息中的结构化意图。",
+    )
+
+    assert result is parsed_result
+    assert result.intent == IntentType.LOGISTICS
+    assert result.order_number == "SM-20260727-001"
+    sdk.responses.parse.assert_called_once_with(
+        model="test-model",
+        input="查询订单 SM-20260727-001 的物流进度",
+        text_format=IntentExtraction,
+        instructions="提取客户消息中的结构化意图。",
+    )
+
+
+def test_llm_client_rejects_missing_structured_response() -> None:
+    client = configured_client()
+    sdk = attach_mock_sdk(client)
+    sdk.responses.parse.return_value = Mock(output_parsed=None)
+
+    with pytest.raises(LLMUnavailableError) as error:
+        client.parse_structured(
+            "测试无效结构化响应",
+            response_model=IntentExtraction,
+        )
 
     assert error.value.code == "LLM_UNAVAILABLE"

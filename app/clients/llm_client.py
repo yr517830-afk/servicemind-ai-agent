@@ -1,3 +1,6 @@
+from typing import TypeVar
+
+from pydantic import BaseModel
 from openai import (
     APIConnectionError,
     APIStatusError,
@@ -9,7 +12,10 @@ from openai import (
 )
 
 from app.core.config import settings
-
+StructuredOutputT = TypeVar(
+    "StructuredOutputT",
+    bound=BaseModel,
+)
 
 class LLMError(RuntimeError):
     """LLM 客户端统一异常。"""
@@ -136,5 +142,58 @@ class LLMClient:
 
         return output_text
 
+    def parse_structured(
+        self,
+        prompt: str,
+        *,
+        response_model: type[StructuredOutputT],
+        instructions: str | None = None,
+    ) -> StructuredOutputT:
+        """调用 Responses API，并返回经过 Pydantic 校验的结构化结果。"""
+        if self._client is None:
+            raise LLMNotConfiguredError("LLM API Key 尚未配置。")
+
+        request: dict[str, object] = {
+            "model": self.model,
+            "input": prompt,
+            "text_format": response_model,
+        }
+        if instructions:
+            request["instructions"] = instructions
+
+        try:
+            response = self._client.responses.parse(**request)
+        except APITimeoutError:
+            raise LLMTimeoutError(
+                "LLM 请求超时，请稍后重试。"
+            ) from None
+        except RateLimitError:
+            raise LLMRateLimitError(
+                "LLM 请求过于频繁，请稍后重试。"
+            ) from None
+        except AuthenticationError:
+            raise LLMAuthenticationError(
+                "LLM API 身份验证失败。"
+            ) from None
+        except APIConnectionError:
+            raise LLMUnavailableError(
+                "当前无法连接 LLM 服务。"
+            ) from None
+        except APIStatusError:
+            raise LLMUnavailableError(
+                "LLM 服务返回异常状态。"
+            ) from None
+        except OpenAIError:
+            raise LLMUnavailableError(
+                "LLM 服务调用失败。"
+            ) from None
+
+        parsed = response.output_parsed
+        if parsed is None:
+            raise LLMUnavailableError(
+                "LLM 服务未返回有效的结构化结果。"
+            )
+
+        return parsed
 
 llm_client = LLMClient()

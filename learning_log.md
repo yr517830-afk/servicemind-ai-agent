@@ -4371,3 +4371,107 @@ No broken requirements found.
 - [x] Ruff 检查通过
 - [x] Python 依赖检查通过
 - [x] API 与 PostgreSQL 容器健康
+
+# Day 16：LLM 结构化意图提取
+
+## 今日目标
+
+1. 使用 Pydantic 定义结构化意图模型。
+2. 让 OpenAI Responses API 返回经过校验的结构化数据。
+3. 从客户消息中提取意图、订单号、风险等级和判断说明。
+4. 在未配置 API Key 或解析失败时提供安全兜底。
+5. 使用 Mock 验证 15 条客户输入，不消耗真实 Token。
+
+## 完成内容
+
+### 1. 结构化数据模型
+
+新增 `app/schemas/intent.py`，定义 `IntentType`、`RiskLevel` 和 `IntentExtraction`。
+
+`IntentExtraction` 包含以下必填字段：
+
+- `intent`
+- `order_number`
+- `risk`
+- `confidence_reason`
+
+模型使用 `extra="forbid"`，拒绝模型返回未定义字段。
+
+### 2. OpenAI 结构化输出
+
+扩展 `LLMClient`，新增 `parse_structured()` 方法。该方法使用 OpenAI Responses API 的结构化解析能力，通过 Pydantic 模型校验输出，并直接返回已校验的 Python 对象，避免手动解析不可靠的 JSON 字符串。
+
+### 3. 意图提取服务
+
+新增 `app/services/intent_service.py`，负责：
+
+- 清理客户输入
+- 调用 LLM 结构化输出
+- 提取客户意图和订单号
+- 判断风险等级
+- 返回置信说明
+- 忽略客户消息中可能包含的提示注入指令
+
+### 4. 安全兜底
+
+客户消息为空、API Key 未配置、LLM 调用失败或结构化结果无效时，服务不会崩溃，而是返回：
+
+```json
+{
+  "intent": "other",
+  "order_number": null,
+  "risk": "unknown",
+  "confidence_reason": "结构化提取失败，已使用安全兜底结果。"
+}
+```
+
+### 5. 自动化测试
+
+新增 15 条参数化客户消息测试，覆盖物流、订单状态、退款、支付、账号安全、投诉、普通咨询和无法判断等场景。另外验证了：
+
+- LLM 异常时返回兜底结果
+- 空消息不调用 LLM
+- `responses.parse()` 接收 Pydantic 模型
+- 缺少结构化响应时抛出统一异常
+
+最终检查结果：
+
+```text
+62 passed
+All checks passed!
+No broken requirements found.
+```
+
+## 今日收获
+
+1. 学会使用 Pydantic 描述大模型结构化输出。
+2. 学会使用 Responses API 的结构化解析功能。
+3. 理解结构化输出比手动解析 JSON 字符串更可靠。
+4. 学会在 LLM 不可用时保持业务服务稳定。
+5. 学会使用参数化测试覆盖多类客户表达。
+6. 学会使用 Mock 测试模型集成而不消耗真实 Token。
+
+## 面试表达
+
+我在 ServiceMind 中使用 Pydantic 定义了包含意图、订单号、风险等级和判断依据的结构化输出模型，并通过 OpenAI Responses API 的结构化解析能力直接获得经过校验的业务对象。为避免模型服务故障影响工单主流程，我为未配置密钥、调用异常、无效输出和空消息设计了统一安全兜底。同时使用 Mock 和参数化测试覆盖 15 类客户表达，不依赖网络，也不消耗真实 Token。
+
+## 当前边界
+
+- 当前没有配置真实 API Key，尚未验证真实模型的语义识别准确率。
+- 当前意图提取服务尚未暴露为独立 HTTP 接口。
+- 当前没有保存意图提取历史和 Token 使用情况。
+- 15 条输入测试验证结构化处理流程，真实模型效果仍需配置 API Key 后评估。
+
+## Day 16 完成情况
+
+- [x] 定义意图枚举和风险等级枚举
+- [x] 定义 `IntentExtraction`
+- [x] 接入 Responses API 结构化输出
+- [x] 实现意图提取服务
+- [x] 实现空消息和 LLM 异常兜底
+- [x] 完成 15 条输入测试
+- [x] 完成结构化客户端测试
+- [x] 全项目 62 项测试通过
+- [x] Ruff 检查通过
+- [x] Python 依赖检查通过
+- [x] Docker Compose 配置检查通过
