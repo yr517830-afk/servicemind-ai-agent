@@ -48,6 +48,7 @@ servicemind-postgres   healthy
 - Swagger UI：<http://127.0.0.1:8000/docs>
 - 健康检查：<http://127.0.0.1:8000/health>
 - LLM 配置健康检查：<http://127.0.0.1:8000/health/llm>
+- 流式聊天演示：<http://127.0.0.1:8000/chat>
 - OpenAPI JSON：<http://127.0.0.1:8000/openapi.json>
 
 ### 5. 停止服务
@@ -349,6 +350,35 @@ PostgreSQL 17
 - 全项目 43 个 pytest 测试通过
 - Ruff 与 Python 依赖检查通过
 
+### Day 16：LLM 结构化意图提取
+
+- 使用 Pydantic 定义意图、订单号、风险等级和判断依据
+- 使用 Responses API 解析结构化输出
+- 为未配置密钥、调用失败和空消息提供安全兜底
+- 使用 Mock 和参数化测试覆盖 15 类客户表达
+- 全项目 62 个 pytest 测试通过
+
+### Day 17：Prompt 版本化与对比评估
+
+- 将 system prompt、few-shot 示例和元数据保存到独立版本目录
+- 支持在不修改业务代码的情况下切换 Prompt v1/v2
+- 建立固定的 15 条意图提取评估样本
+- 实现默认不调用真实 API 的 dry-run 对比脚本
+- 全项目 77 个 pytest 测试通过
+
+### Day 18：SSE 流式聊天与演示页面
+
+- 为 Responses API 客户端增加 `stream=True` 流式调用
+- 消费 `response.output_text.delta` 增量文本事件
+- 实现 `POST /chat/stream` SSE 流式接口
+- 定义 `start`、`delta`、`done` 和 `error` 事件协议
+- 新增原生 HTML 聊天页面 `GET /chat`
+- 提供明确标识的无 API Key 本地演示模式
+- 使用 `textContent` 安全显示模型输出
+- Docker 镜像升级为 `servicemind-api:day18`
+- 全项目 88 个 pytest 测试通过
+- Ruff、依赖和 Compose 配置检查通过
+
 
 ## 项目结构
 
@@ -359,6 +389,7 @@ servicemind-ai-agent/
 │   │   ├── __init__.py
 │   │   └── routes/
 │   │       ├── __init__.py
+│   │       ├── chat.py
 │   │       ├── customers.py
 │   │       ├── health.py
 │   │       ├── orders.py
@@ -380,17 +411,26 @@ servicemind-ai-agent/
 │   │   ├── customer_repository.py
 │   │   ├── order_repository.py
 │   │   └── ticket_repository.py
+│   ├── prompts/
+│   │   ├── __init__.py
+│   │   └── loader.py
 │   ├── schemas/
 │   │   ├── __init__.py
+│   │   ├── chat.py
 │   │   ├── customers.py
 │   │   ├── errors.py
+│   │   ├── intent.py
 │   │   ├── orders.py
 │   │   └── tickets.py
 │   ├── services/
 │   │   ├── __init__.py
+│   │   ├── chat_service.py
 │   │   ├── customer_service.py
+│   │   ├── intent_service.py
 │   │   ├── order_service.py
 │   │   └── ticket_service.py
+│   ├── static/
+│   │   └── chat.html
 │   ├── __init__.py
 │   └── main.py
 ├── config/
@@ -398,16 +438,34 @@ servicemind-ai-agent/
 ├── docs/
 │   ├── api.md
 │   └── er-diagram.md
+├── evals/
+│   └── intent_extraction_samples.json
+├── prompts/
+│   └── intent_extraction/
+│       ├── v1/
+│       │   ├── examples.json
+│       │   ├── metadata.json
+│       │   └── system.md
+│       └── v2/
+│           ├── examples.json
+│           ├── metadata.json
+│           └── system.md
 ├── scripts/
 │   ├── __init__.py
+│   ├── compare_intent_prompts.py
 │   ├── query_database.py
 │   └── seed_database.py
 ├── tests/
 │   ├── conftest.py
 │   ├── test_api.py
+│   ├── test_chat_api.py
+│   ├── test_chat_service.py
 │   ├── test_config.py
+│   ├── test_intent_service.py
 │   ├── test_llm_client.py
 │   ├── test_models.py
+│   ├── test_prompt_comparison.py
+│   ├── test_prompt_loader.py
 │   ├── test_rules.py
 │   └── test_validators.py
 ├── ticket_core/
@@ -529,7 +587,7 @@ python -m pip check
 预期结果：
 
 ```text
-34 passed
+88 passed
 All checks passed!
 No broken requirements found.
 ```
@@ -577,13 +635,18 @@ python -m uvicorn app.main:app --reload
 
 ```text
 健康检查：http://127.0.0.1:8000/health
+LLM 配置：http://127.0.0.1:8000/health/llm
 接口文档：http://127.0.0.1:8000/docs
+流式聊天：http://127.0.0.1:8000/chat
 ```
 
 当前接口：
 
 ```text
 GET   /health
+GET   /health/llm
+GET   /chat
+POST  /chat/stream
 GET   /customers/{customer_id}
 GET   /orders/{order_id}
 POST  /tickets
@@ -623,7 +686,7 @@ python -m pytest -q
 当前测试结果：
 
 ```text
-34 passed
+88 passed
 ```
 
 ### 单独运行输入校验测试

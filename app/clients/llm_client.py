@@ -1,5 +1,5 @@
+from collections.abc import Iterator
 from typing import TypeVar
-
 from pydantic import BaseModel
 from openai import (
     APIConnectionError,
@@ -141,6 +141,75 @@ class LLMClient:
             raise LLMUnavailableError("LLM 服务未返回有效文本。")
 
         return output_text
+
+    def stream_text(
+        self,
+        prompt: str,
+        *,
+        instructions: str | None = None,
+    ) -> Iterator[str]:
+        """调用 Responses API，并逐段返回生成的文本。"""
+        if self._client is None:
+            raise LLMNotConfiguredError("LLM API Key 尚未配置。")
+
+        request: dict[str, object] = {
+            "model": self.model,
+            "input": prompt,
+            "stream": True,
+        }
+        if instructions:
+            request["instructions"] = instructions
+
+        emitted_text = False
+
+        try:
+            stream = self._client.responses.create(**request)
+
+            for event in stream:
+                event_type = getattr(event, "type", "")
+
+                if event_type == "response.output_text.delta":
+                    delta = getattr(event, "delta", "")
+                    if delta:
+                        emitted_text = True
+                        yield delta
+
+                elif event_type in {"error", "response.failed"}:
+                    raise LLMUnavailableError(
+                        "LLM 流式响应生成失败。"
+                    )
+
+        except LLMError:
+            raise
+        except APITimeoutError:
+            raise LLMTimeoutError(
+                "LLM 请求超时，请稍后重试。"
+            ) from None
+        except RateLimitError:
+            raise LLMRateLimitError(
+                "LLM 请求过于频繁，请稍后重试。"
+            ) from None
+        except AuthenticationError:
+            raise LLMAuthenticationError(
+                "LLM API 身份验证失败。"
+            ) from None
+        except APIConnectionError:
+            raise LLMUnavailableError(
+                "当前无法连接 LLM 服务。"
+            ) from None
+        except APIStatusError:
+            raise LLMUnavailableError(
+                "LLM 服务返回异常状态。"
+            ) from None
+        except OpenAIError:
+            raise LLMUnavailableError(
+                "LLM 服务调用失败。"
+            ) from None
+
+        if not emitted_text:
+            raise LLMUnavailableError(
+                "LLM 服务未返回有效的流式文本。"
+            )
 
     def parse_structured(
         self,

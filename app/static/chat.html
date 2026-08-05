@@ -1,0 +1,333 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1"
+    >
+    <title>ServiceMind 流式客服</title>
+
+    <style>
+        :root {
+            color-scheme: light;
+            font-family:
+                Inter, "Microsoft YaHei", system-ui, sans-serif;
+            background: #f4f7fb;
+            color: #172033;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            min-height: 100vh;
+            display: grid;
+            place-items: center;
+            padding: 24px;
+        }
+
+        main {
+            width: min(760px, 100%);
+            background: #ffffff;
+            border: 1px solid #dce3ee;
+            border-radius: 18px;
+            box-shadow: 0 16px 48px rgba(28, 39, 60, 0.1);
+            overflow: hidden;
+        }
+
+        header {
+            padding: 24px 28px;
+            color: #ffffff;
+            background:
+                linear-gradient(135deg, #1769e0, #7547e8);
+        }
+
+        h1 {
+            margin: 0 0 8px;
+            font-size: 26px;
+        }
+
+        header p {
+            margin: 0;
+            opacity: 0.9;
+        }
+
+        form {
+            padding: 24px 28px 16px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 600;
+        }
+
+        textarea {
+            width: 100%;
+            min-height: 110px;
+            resize: vertical;
+            padding: 14px;
+            border: 1px solid #c9d3e2;
+            border-radius: 10px;
+            font: inherit;
+        }
+
+        textarea:focus {
+            outline: 3px solid rgba(23, 105, 224, 0.15);
+            border-color: #1769e0;
+        }
+
+        .controls {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 16px;
+            margin-top: 14px;
+        }
+
+        .demo-option {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin: 0;
+            font-weight: 400;
+        }
+
+        button {
+            border: 0;
+            border-radius: 9px;
+            padding: 11px 20px;
+            color: #ffffff;
+            background: #1769e0;
+            font: inherit;
+            font-weight: 600;
+            cursor: pointer;
+        }
+
+        button:disabled {
+            cursor: wait;
+            opacity: 0.6;
+        }
+
+        .result {
+            padding: 0 28px 28px;
+        }
+
+        .status {
+            min-height: 24px;
+            margin-bottom: 8px;
+            color: #596579;
+            font-size: 14px;
+        }
+
+        .status.error {
+            color: #c72c41;
+        }
+
+        .answer {
+            min-height: 150px;
+            margin: 0;
+            padding: 18px;
+            border-radius: 12px;
+            background: #f7f9fc;
+            border: 1px solid #dce3ee;
+            white-space: pre-wrap;
+            overflow-wrap: anywhere;
+            line-height: 1.75;
+        }
+
+        .cursor::after {
+            content: "▋";
+            color: #1769e0;
+            animation: blink 0.8s infinite;
+        }
+
+        @keyframes blink {
+            50% {
+                opacity: 0;
+            }
+        }
+    </style>
+</head>
+
+<body>
+<main>
+    <header>
+        <h1>ServiceMind AI Agent</h1>
+        <p>FastAPI + OpenAI Responses API + SSE 流式输出</p>
+    </header>
+
+    <form id="chat-form">
+        <label for="message">客户消息</label>
+
+        <textarea
+            id="message"
+            maxlength="4000"
+            required
+        >请介绍一下 ServiceMind 的流式输出功能。</textarea>
+
+        <div class="controls">
+            <label class="demo-option">
+                <input id="demo" type="checkbox" checked>
+                无 API Key 演示模式
+            </label>
+
+            <button id="submit-button" type="submit">
+                发送消息
+            </button>
+        </div>
+    </form>
+
+    <section class="result">
+        <div id="status" class="status">
+            等待发送消息
+        </div>
+
+        <pre
+            id="answer"
+            class="answer"
+            aria-live="polite"
+        ></pre>
+    </section>
+</main>
+
+<script>
+    const form = document.querySelector("#chat-form");
+    const messageInput = document.querySelector("#message");
+    const demoInput = document.querySelector("#demo");
+    const submitButton = document.querySelector("#submit-button");
+    const statusElement = document.querySelector("#status");
+    const answerElement = document.querySelector("#answer");
+
+    const wait = (milliseconds) =>
+        new Promise((resolve) => setTimeout(resolve, milliseconds));
+
+    async function handleSseBlock(block, demoMode) {
+        let eventName = "message";
+        const dataLines = [];
+
+        for (const line of block.split("\n")) {
+            if (line.startsWith("event:")) {
+                eventName = line.slice(6).trim();
+            }
+
+            if (line.startsWith("data:")) {
+                dataLines.push(line.slice(5).trim());
+            }
+        }
+
+        if (dataLines.length === 0) {
+            return;
+        }
+
+        const data = JSON.parse(dataLines.join("\n"));
+
+        if (eventName === "start") {
+            statusElement.textContent =
+                data.mode === "demo"
+                    ? "正在运行本地演示流"
+                    : "正在连接 AI 模型";
+            answerElement.classList.add("cursor");
+        }
+
+        if (eventName === "delta") {
+            answerElement.textContent += data.text;
+
+            if (demoMode) {
+                await wait(180);
+            }
+        }
+
+        if (eventName === "done") {
+            statusElement.textContent = "回复完成";
+            answerElement.classList.remove("cursor");
+        }
+
+        if (eventName === "error") {
+            statusElement.textContent =
+                `${data.code}: ${data.message}`;
+            statusElement.classList.add("error");
+            answerElement.classList.remove("cursor");
+        }
+    }
+
+    form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+
+        const message = messageInput.value.trim();
+        const demoMode = demoInput.checked;
+
+        if (!message) {
+            statusElement.textContent = "请输入客户消息";
+            statusElement.classList.add("error");
+            return;
+        }
+
+        answerElement.textContent = "";
+        statusElement.textContent = "正在建立连接";
+        statusElement.classList.remove("error");
+        submitButton.disabled = true;
+
+        try {
+            const response = await fetch("/chat/stream", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    "Accept": "text/event-stream"
+                },
+                body: JSON.stringify({
+                    message,
+                    demo: demoMode
+                })
+            });
+
+            if (!response.ok) {
+                throw new Error(
+                    `HTTP ${response.status}`
+                );
+            }
+
+            if (!response.body) {
+                throw new Error("浏览器不支持流式响应");
+            }
+
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder("utf-8");
+            let buffer = "";
+
+            while (true) {
+                const {value, done} = await reader.read();
+
+                if (done) {
+                    break;
+                }
+
+                buffer += decoder
+                    .decode(value, {stream: true})
+                    .replaceAll("\r\n", "\n");
+
+                let boundary = buffer.indexOf("\n\n");
+
+                while (boundary !== -1) {
+                    const block = buffer.slice(0, boundary);
+                    buffer = buffer.slice(boundary + 2);
+
+                    await handleSseBlock(block, demoMode);
+                    boundary = buffer.indexOf("\n\n");
+                }
+            }
+        } catch (error) {
+            statusElement.textContent =
+                `请求失败：${error.message}`;
+            statusElement.classList.add("error");
+            answerElement.classList.remove("cursor");
+        } finally {
+            submitButton.disabled = false;
+        }
+    });
+</script>
+</body>
+</html>

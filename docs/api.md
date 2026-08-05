@@ -35,6 +35,7 @@ docker compose down
 - OpenAPI JSON：`http://127.0.0.1:8000/openapi.json`
 - 健康检查：`http://127.0.0.1:8000/health`
 - LLM 配置健康检查：`http://127.0.0.1:8000/health/llm`
+- 流式聊天页面：`http://127.0.0.1:8000/chat`
 
 ## 接口列表
 
@@ -42,6 +43,8 @@ docker compose down
 |---|---|---|---:|
 | GET | `/health` | 服务健康检查 | 200 |
 | GET | `/health/llm` | 检查 LLM 客户端配置状态 | 200 |
+| GET | `/chat` | 打开流式聊天演示页面 | 200 |
+| POST | `/chat/stream` | 通过 SSE 增量返回客服回复 | 200 |
 | POST | `/tickets` | 创建工单并执行路由规则 | 201 |
 | GET | `/tickets` | 分页及组合筛选工单 | 200 |
 | GET | `/tickets/{ticket_id}` | 查询工单详情 | 200 |
@@ -80,6 +83,72 @@ OPENAI_MAX_RETRIES=1
 ```
 
 真实 API Key 只能写入本地 `.env`，不能提交到 Git。
+
+## SSE 流式聊天
+
+浏览器访问：
+
+```text
+http://127.0.0.1:8000/chat
+```
+
+流式接口：
+
+```http
+POST /chat/stream
+Content-Type: application/json
+Accept: text/event-stream
+```
+
+请求示例：
+
+```json
+{
+  "message": "请介绍一下 ServiceMind 的流式输出功能。",
+  "demo": true
+}
+```
+
+`demo=true` 使用不调用外部模型的本地演示流，适合在没有 API Key 时验证网页和 SSE 协议；`demo=false` 使用已配置的 OpenAI Responses API。演示模式会在页面上明确标识，不代表真实模型回答。
+
+事件顺序：
+
+```text
+event: start
+data: {"status":"started","mode":"demo"}
+
+event: delta
+data: {"text":"您好，"}
+
+event: done
+data: {"status":"completed"}
+```
+
+事件类型：
+
+| 事件 | 说明 |
+|---|---|
+| `start` | 流已建立，并说明当前是 `demo` 或 `llm` 模式 |
+| `delta` | 一段新增文本，客户端应追加显示 |
+| `done` | 回复正常结束 |
+| `error` | 返回稳定错误码与安全错误信息，并终止当前流 |
+
+PowerShell 验证：
+
+```powershell
+$body = @{
+    message = "请演示流式输出"
+    demo = $true
+} | ConvertTo-Json
+
+(Invoke-WebRequest `
+    -Method Post `
+    -Uri "http://127.0.0.1:8000/chat/stream" `
+    -ContentType "application/json" `
+    -Body $body `
+    -UseBasicParsing
+).Content
+```
 
 ## 创建工单
 
@@ -219,7 +288,7 @@ python -m pip check
 当前验收结果：
 
 ```text
-35 passed
+88 passed
 All checks passed!
 No broken requirements found.
 ```

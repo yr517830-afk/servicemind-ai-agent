@@ -4618,3 +4618,156 @@ No broken requirements found.
 - [x] 完成 Prompt 版本化自动化测试
 - [x] 全项目 77 项测试通过
 - [x] Ruff、依赖和 Compose 配置检查通过
+
+# Day 18：SSE 流式输出与聊天演示页面
+
+## 今日目标
+
+1. 使用 OpenAI Responses API 获取增量文本。
+2. 使用 FastAPI `StreamingResponse` 暴露 SSE 接口。
+3. 定义稳定的流式事件协议和结束信号。
+4. 创建不依赖前端框架的简单聊天页面。
+5. 在没有真实 API Key 时仍可验证完整流式链路。
+
+## 完成内容
+
+### 1. Responses API 流式客户端
+
+扩展 `LLMClient`，新增 `stream_text()`：
+
+- 请求参数使用 `stream=True`
+- 只消费 `response.output_text.delta` 文本增量事件
+- 忽略与文本无关的生命周期事件
+- 将流建立阶段和迭代阶段的 SDK 异常映射为项目统一异常
+- 拒绝没有任何有效文本的空流
+- 未配置 API Key 时抛出稳定的 `LLM_NOT_CONFIGURED` 错误
+
+### 2. SSE 事件协议
+
+新增聊天 Service，并统一生成以下事件：
+
+```text
+start -> delta -> ... -> done
+                 \-> error
+```
+
+- `start`：说明流已开始以及当前运行模式
+- `delta`：携带一段新增文本
+- `done`：表示本次回复正常完成
+- `error`：携带稳定错误码与安全错误信息并终止流
+
+所有 SSE 数据使用 JSON 编码和 UTF-8 中文，事件之间使用空行分隔。
+
+### 3. FastAPI 流式接口
+
+新增：
+
+```http
+POST /chat/stream
+```
+
+接口使用 `StreamingResponse` 和 `text/event-stream`，并设置：
+
+- `Cache-Control: no-cache`
+- `X-Accel-Buffering: no`
+
+OpenAPI 同步声明 `text/event-stream` 响应类型。
+
+### 4. 原生聊天页面
+
+新增：
+
+```http
+GET /chat
+```
+
+页面只使用原生 HTML、CSS 和 JavaScript，不引入 Streamlit 或额外前端依赖。浏览器通过 `fetch()` 和 `ReadableStream` 读取响应，使用缓冲区处理网络分块可能从任意位置断开的情况，再按 SSE 空行边界解析事件。
+
+模型文本通过 `textContent` 追加显示，不作为 HTML 执行，降低脚本注入风险。页面显示连接状态、流式光标、错误信息和完成状态。
+
+### 5. 无密钥演示模式
+
+聊天请求支持显式的 `demo=true`。该模式不调用外部模型、不消耗 Token，用固定分段文本验证：
+
+- HTTP 流式传输
+- SSE 事件解析
+- 浏览器增量渲染
+- `done` 结束信号
+
+网页会明确显示“无 API Key 演示模式”，避免把演示内容误认为真实模型回答。取消勾选后才会使用真实 LLM 配置。
+
+### 6. 自动化测试与容器验证
+
+新增测试覆盖：
+
+- LLM 文本增量流
+- 无密钥流式调用
+- 空流拒绝
+- SSE JSON 编码
+- 聊天 Service 正常流、错误流和演示流
+- SSE 响应头与事件顺序
+- 空消息 422 校验
+- OpenAPI 流式响应描述
+- 聊天 HTML 页面可访问性
+
+Docker 镜像升级为：
+
+```text
+servicemind-api:day18
+```
+
+API 与 PostgreSQL 容器均通过健康检查，容器内 `/chat` 页面和 `/chat/stream` 接口完成验证。
+
+最终检查结果：
+
+```text
+88 passed
+All checks passed!
+No broken requirements found.
+```
+
+## 今日遇到的问题
+
+### 1. 流式测试不能直接读取 `response.text`
+
+HTTPX 流式响应在读取前没有完整 `_content`，直接访问 `response.text` 会触发 `ResponseNotRead`。测试改为先调用 `response.read()`，再使用 UTF-8 解码。
+
+### 2. Docker Hub 临时返回 EOF
+
+构建阶段读取 `python:3.14-slim` 元数据时，Docker Hub 连接临时中断。该问题与 Dockerfile 语法无关，重新拉取基础镜像后构建成功。
+
+## 今日收获
+
+1. 理解普通 HTTP 响应与流式响应的差异。
+2. 学会使用 Responses API 的语义化流事件。
+3. 学会设计 `start`、`delta`、`done`、`error` 生命周期。
+4. 学会使用 FastAPI `StreamingResponse` 返回 SSE。
+5. 学会在浏览器中处理跨网络分块的 SSE 文本。
+6. 学会在没有 API Key 时建立可验证、明确标识的演示路径。
+7. 理解流式内容在生产环境中需要额外考虑审核、断线和取消请求。
+
+## 面试表达
+
+我在 ServiceMind 中基于 OpenAI Responses API 和 FastAPI `StreamingResponse` 实现了 SSE 流式聊天链路。LLM 客户端只消费文本增量事件，Service 层把模型输出转换为稳定的 `start`、`delta`、`done` 和 `error` 协议，浏览器使用 `ReadableStream` 处理任意网络分块并实时追加内容。为了让项目在没有真实 API Key 时仍可验收，我增加了明确标识、不会调用外部模型的演示模式。整条链路通过 Mock、接口测试和 Docker 容器验证，不依赖真实 Token。
+
+## 当前边界
+
+- 当前没有配置真实 API Key，因此只完成协议、Mock 和本地演示流验证。
+- 当前聊天接口没有保存多轮会话历史。
+- 当前没有实现客户端取消请求和服务端断线检测。
+- 当前没有统计首个 Token 延迟、总生成时间和 Token 用量。
+- 流式输出在生产环境中还需要补充内容审核、限流和身份认证。
+
+## Day 18 完成情况
+
+- [x] Responses API 流式文本客户端
+- [x] 统一流式异常映射
+- [x] SSE 事件编码
+- [x] `POST /chat/stream`
+- [x] `start`、`delta`、`done`、`error` 事件协议
+- [x] `GET /chat` 原生演示页面
+- [x] 无 API Key 演示模式
+- [x] 流式接口与页面自动化测试
+- [x] Docker 镜像升级为 Day18
+- [x] 全项目 88 项测试通过
+- [x] Ruff、依赖和 Compose 配置检查通过

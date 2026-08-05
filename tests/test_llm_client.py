@@ -182,3 +182,64 @@ def test_llm_client_rejects_missing_structured_response() -> None:
         )
 
     assert error.value.code == "LLM_UNAVAILABLE"
+
+def test_llm_client_streams_text() -> None:
+    client = configured_client()
+    sdk = attach_mock_sdk(client)
+
+    sdk.responses.create.return_value = [
+        Mock(type="response.created"),
+        Mock(
+            type="response.output_text.delta",
+            delta="你好",
+        ),
+        Mock(
+            type="response.output_text.delta",
+            delta="，有什么可以帮助你？",
+        ),
+        Mock(type="response.completed"),
+    ]
+
+    chunks = list(
+        client.stream_text(
+            "客户的问题",
+            instructions="你是客服助手。",
+        )
+    )
+
+    assert chunks == [
+        "你好",
+        "，有什么可以帮助你？",
+    ]
+    assert "".join(chunks) == "你好，有什么可以帮助你？"
+
+    sdk.responses.create.assert_called_once_with(
+        model="test-model",
+        input="客户的问题",
+        stream=True,
+        instructions="你是客服助手。",
+    )
+
+
+def test_llm_client_stream_requires_api_key() -> None:
+    client = LLMClient(api_key="")
+
+    with pytest.raises(LLMNotConfiguredError) as error:
+        list(client.stream_text("你好"))
+
+    assert error.value.code == "LLM_NOT_CONFIGURED"
+
+
+def test_llm_client_rejects_empty_stream() -> None:
+    client = configured_client()
+    sdk = attach_mock_sdk(client)
+
+    sdk.responses.create.return_value = [
+        Mock(type="response.created"),
+        Mock(type="response.completed"),
+    ]
+
+    with pytest.raises(LLMUnavailableError) as error:
+        list(client.stream_text("测试空流"))
+
+    assert error.value.code == "LLM_UNAVAILABLE"
