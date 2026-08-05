@@ -48,6 +48,25 @@ def test_chat_stream_rejects_empty_message(
     assert response.status_code == 422
 
 
+def test_chat_stream_returns_long_input_fallback(
+    api_client: TestClient,
+) -> None:
+    with api_client.stream(
+        "POST",
+        "/chat/stream",
+        json={
+            "message": "问题" * 1001,
+            "demo": False,
+        },
+    ) as response:
+        body = response.read().decode("utf-8")
+
+    assert response.status_code == 200
+    assert "event: error" in body
+    assert "INPUT_TOO_LONG" in body
+    assert "shorten_input" in body
+
+
 def test_openapi_describes_chat_stream(
     api_client: TestClient,
 ) -> None:
@@ -72,3 +91,8 @@ def test_chat_page_returns_demo_html(
     assert "ServiceMind AI Agent" in response.text
     assert "/chat/stream" in response.text
     assert "textContent" in response.text
+    assert 'id="fallback-panel"' in response.text
+    assert "use_rules" in response.text
+    assert "retry_later" in response.text
+    assert "shorten_input" in response.text
+    assert "human_handoff" in response.text

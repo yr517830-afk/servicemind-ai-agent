@@ -2,7 +2,13 @@ from unittest.mock import Mock
 
 import pytest
 
-from app.clients.llm_client import LLMClient, LLMUnavailableError
+from app.clients.llm_client import (
+    LLMClient,
+    LLMInvalidResponseError,
+    LLMRateLimitError,
+    LLMRefusalError,
+    LLMUnavailableError,
+)
 from app.schemas.intent import IntentExtraction, IntentType, RiskLevel
 from app.services.intent_service import IntentService
 
@@ -161,7 +167,7 @@ def test_intent_service_uses_fallback_when_llm_fails() -> None:
     assert result.intent == IntentType.OTHER
     assert result.order_number is None
     assert result.risk == RiskLevel.UNKNOWN
-    assert "LLM_UNAVAILABLE" in result.confidence_reason
+    assert "use_rules" in result.confidence_reason
 
 
 def test_intent_service_handles_empty_message_without_llm() -> None:
@@ -174,4 +180,47 @@ def test_intent_service_handles_empty_message_without_llm() -> None:
     assert result.order_number is None
     assert result.risk == RiskLevel.UNKNOWN
     assert result.confidence_reason == "客户消息为空，无法判断意图。"
+    client.parse_structured.assert_not_called()
+
+@pytest.mark.parametrize(
+    ("error", "expected_text"),
+    [
+        (
+            LLMInvalidResponseError("非法结构化结果"),
+            "use_rules",
+        ),
+        (
+            LLMRefusalError("模型拒答"),
+            "human_handoff",
+        ),
+        (
+            LLMRateLimitError("触发限流"),
+            "retry_later",
+        ),
+    ],
+)
+def test_intent_service_uses_specific_fallback(
+    error: Exception,
+    expected_text: str,
+) -> None:
+    client = Mock(spec=LLMClient)
+    client.parse_structured.side_effect = error
+    service = IntentService(client)
+
+    result = service.extract("查询订单状态")
+
+    assert result.intent == IntentType.OTHER
+    assert result.risk == RiskLevel.UNKNOWN
+    assert expected_text in result.confidence_reason
+
+
+def test_intent_service_rejects_long_input_without_llm() -> None:
+    client = Mock(spec=LLMClient)
+    service = IntentService(client)
+
+    result = service.extract("问题" * 1001)
+
+    assert result.intent == IntentType.OTHER
+    assert result.risk == RiskLevel.UNKNOWN
+    assert "shorten_input" in result.confidence_reason
     client.parse_structured.assert_not_called()

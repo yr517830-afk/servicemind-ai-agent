@@ -23,7 +23,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: servicemind-api:day18
+    image: servicemind-api:day19
     container_name: servicemind-api
     environment:
       DEBUG: "false"

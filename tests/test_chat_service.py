@@ -1,7 +1,14 @@
 import json
 from unittest.mock import Mock
 
-from app.clients.llm_client import LLMNotConfiguredError
+import pytest
+
+from app.clients.llm_client import (
+    LLMInvalidResponseError,
+    LLMNotConfiguredError,
+    LLMRateLimitError,
+    LLMRefusalError,
+)
 from app.schemas.chat import ChatStreamRequest
 from app.services.chat_service import ChatService, encode_sse_event
 
@@ -102,4 +109,71 @@ def test_chat_service_supports_demo_stream() -> None:
         for event in events
     ) == 4
 
+    client.stream_text.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("error", "expected_code", "expected_action"),
+    [
+        (
+            LLMInvalidResponseError("非法响应"),
+            "INVALID_RESPONSE",
+            "use_rules",
+        ),
+        (
+            LLMRefusalError("模型拒答"),
+            "MODEL_REFUSAL",
+            "human_handoff",
+        ),
+        (
+            LLMRateLimitError("触发限流"),
+            "RATE_LIMITED",
+            "retry_later",
+        ),
+    ],
+)
+def test_chat_service_returns_fallback_sse(
+    error: Exception,
+    expected_code: str,
+    expected_action: str,
+) -> None:
+    client = Mock()
+    client.stream_text.side_effect = error
+    service = ChatService(client=client)
+
+    events = list(
+        service.stream(
+            ChatStreamRequest(message="测试降级")
+        )
+    )
+
+    assert len(events) == 2
+    assert events[1].startswith("event: error\n")
+
+    error_data = parse_sse_data(events[1])
+
+    assert error_data["code"] == expected_code
+    assert error_data["action"] == expected_action
+    assert isinstance(error_data["retryable"], bool)
+    assert error_data["message"]
+
+
+def test_chat_service_rejects_long_input_without_llm() -> None:
+    client = Mock()
+    service = ChatService(client=client)
+
+    events = list(
+        service.stream(
+            ChatStreamRequest(message="问题" * 1001)
+        )
+    )
+
+    assert len(events) == 2
+    assert events[1].startswith("event: error\n")
+
+    error_data = parse_sse_data(events[1])
+
+    assert error_data["code"] == "INPUT_TOO_LONG"
+    assert error_data["action"] == "shorten_input"
+    assert error_data["retryable"] is True
     client.stream_text.assert_not_called()

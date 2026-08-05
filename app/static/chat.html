@@ -127,6 +127,26 @@
             color: #c72c41;
         }
 
+        .fallback-panel {
+            margin: 0 0 12px;
+            padding: 12px 14px;
+            border: 1px solid #f0c36d;
+            border-radius: 10px;
+            background: #fff8e8;
+            color: #684b12;
+            line-height: 1.6;
+        }
+
+        .fallback-panel[hidden] {
+            display: none;
+        }
+
+        .fallback-title {
+            display: block;
+            margin-bottom: 2px;
+            font-weight: 700;
+        }
+
         .answer {
             min-height: 150px;
             margin: 0;
@@ -186,6 +206,19 @@
             等待发送消息
         </div>
 
+        <div
+            id="fallback-panel"
+            class="fallback-panel"
+            role="status"
+            hidden
+        >
+            <strong
+                id="fallback-title"
+                class="fallback-title"
+            ></strong>
+            <span id="fallback-detail"></span>
+        </div>
+
         <pre
             id="answer"
             class="answer"
@@ -201,6 +234,16 @@
     const submitButton = document.querySelector("#submit-button");
     const statusElement = document.querySelector("#status");
     const answerElement = document.querySelector("#answer");
+    const fallbackPanel = document.querySelector("#fallback-panel");
+    const fallbackTitle = document.querySelector("#fallback-title");
+    const fallbackDetail = document.querySelector("#fallback-detail");
+
+    const fallbackLabels = {
+        use_rules: "已切换到基础规则",
+        retry_later: "建议稍后重试",
+        shorten_input: "请缩短输入内容",
+        human_handoff: "建议转接人工客服"
+    };
 
     const wait = (milliseconds) =>
         new Promise((resolve) => setTimeout(resolve, milliseconds));
@@ -231,6 +274,7 @@
                     ? "正在运行本地演示流"
                     : "正在连接 AI 模型";
             answerElement.classList.add("cursor");
+            fallbackPanel.hidden = true;
         }
 
         if (eventName === "delta") {
@@ -247,10 +291,19 @@
         }
 
         if (eventName === "error") {
-            statusElement.textContent =
-                `${data.code}: ${data.message}`;
+            statusElement.textContent = data.message;
             statusElement.classList.add("error");
             answerElement.classList.remove("cursor");
+
+            if (data.action) {
+                fallbackTitle.textContent =
+                    fallbackLabels[data.action]
+                    ?? "智能服务已安全降级";
+                fallbackDetail.textContent = data.retryable
+                    ? "处理建议：完成调整后可以重新发送。"
+                    : "处理建议：系统不会自动执行高风险操作。";
+                fallbackPanel.hidden = false;
+            }
         }
     }
 
@@ -267,6 +320,7 @@
         }
 
         answerElement.textContent = "";
+        fallbackPanel.hidden = true;
         statusElement.textContent = "正在建立连接";
         statusElement.classList.remove("error");
         submitButton.disabled = true;

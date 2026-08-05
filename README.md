@@ -379,6 +379,19 @@ PostgreSQL 17
 - 全项目 88 个 pytest 测试通过
 - Ruff、依赖和 Compose 配置检查通过
 
+### Day 19：LLM 失败降级与人工兜底
+
+- 统一定义非法响应、模型拒答、限流和输入过长四类故障
+- 使用 `FailureReply` 返回稳定错误码、用户提示、降级动作和重试标记
+- 结构化意图提取失败时返回安全的 `other / unknown` 结果
+- 模型拒答时建议转接人工客服，限流时提示稍后重试
+- 在调用模型前拦截过长输入，避免浪费 Token 和上下文
+- SSE `error` 事件向前端传递 `action` 与 `retryable`
+- 聊天页面显示规则兜底、稍后重试、缩短输入和人工转接提示
+- Docker 镜像升级为 `servicemind-api:day19`
+- 全项目 102 个 pytest 测试通过
+- Ruff、依赖、Compose 和差异检查通过
+
 
 ## 项目结构
 
@@ -419,6 +432,7 @@ servicemind-ai-agent/
 │   │   ├── chat.py
 │   │   ├── customers.py
 │   │   ├── errors.py
+│   │   ├── failures.py
 │   │   ├── intent.py
 │   │   ├── orders.py
 │   │   └── tickets.py
@@ -426,6 +440,7 @@ servicemind-ai-agent/
 │   │   ├── __init__.py
 │   │   ├── chat_service.py
 │   │   ├── customer_service.py
+│   │   ├── fallback_service.py
 │   │   ├── intent_service.py
 │   │   ├── order_service.py
 │   │   └── ticket_service.py
@@ -461,6 +476,7 @@ servicemind-ai-agent/
 │   ├── test_chat_api.py
 │   ├── test_chat_service.py
 │   ├── test_config.py
+│   ├── test_fallback_service.py
 │   ├── test_intent_service.py
 │   ├── test_llm_client.py
 │   ├── test_models.py
@@ -864,4 +880,19 @@ ServiceMind 支持通过 OpenAI Responses API 将客户消息提取为经过 Pyd
 `IntentService` 可通过版本号切换 Prompt；加载器会校验版本格式、元数据、输出 Schema 和示例内容，并缓存已经加载的版本。`scripts/compare_intent_prompts.py` 使用同一批 15 条样本进行对比，默认执行不产生 API 请求的 dry-run；只有显式指定 `--live` 且配置 API Key 后才会调用真实模型。
 
 当前全项目共有 77 个 pytest 自动化测试。由于尚未配置真实 API Key，目前只验证了版本切换、Prompt 渲染和评估流程，未宣称 v2 的真实模型准确率高于 v1。
+
+## LLM 失败降级
+
+ServiceMind 不会把模型异常直接暴露给用户。系统将四类重点故障转换为稳定的降级协议：
+
+| 故障 | 降级动作 | 用户侧行为 |
+|---|---|---|
+| 非法结构化响应 | `use_rules` | 返回安全兜底结果并继续基础处理 |
+| 模型拒答 | `human_handoff` | 建议转接人工客服确认 |
+| API 限流 | `retry_later` | 提示稍后重新发送 |
+| 输入过长 | `shorten_input` | 在调用模型前拦截并提示精简内容 |
+
+SSE 错误事件同时返回 `code`、`message`、`action` 和 `retryable`。聊天页面只使用 `textContent` 显示这些信息，不执行模型或错误消息中的 HTML。
+
+当前全项目共有 102 个 pytest 自动化测试，四类降级路径均通过 Mock、Service 和 API 测试验证，不依赖真实 API Key。
 

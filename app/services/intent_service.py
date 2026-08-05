@@ -1,10 +1,19 @@
-from app.clients.llm_client import LLMClient, LLMError, llm_client
+from app.clients.llm_client import (
+    LLMClient,
+    LLMError,
+    LLMInvalidResponseError,
+    LLMRateLimitError,
+    LLMRefusalError,
+    llm_client,
+)
 from app.prompts.loader import PromptBundle, load_intent_prompt
+from app.schemas.failures import FailureCode
 from app.schemas.intent import IntentExtraction, IntentType, RiskLevel
+from app.services.fallback_service import fallback_service
 
 
 DEFAULT_INTENT_PROMPT_VERSION = "v2"
-
+MAX_INTENT_MESSAGE_LENGTH = 2000
 
 class IntentService:
     """负责从客户消息中提取结构化意图。"""
@@ -31,6 +40,19 @@ class IntentService:
             order_number=None,
             risk=RiskLevel.UNKNOWN,
             confidence_reason=reason,
+        )
+
+    @classmethod
+    def failure_fallback(
+        cls,
+        code: FailureCode,
+    ) -> IntentExtraction:
+        """把统一故障回复转换为安全的意图提取结果。"""
+
+        reply = fallback_service.reply_for(code)
+
+        return cls.fallback(
+            f"{reply.message} 降级动作：{reply.action.value}。"
         )
 
     @staticmethod
@@ -74,6 +96,11 @@ class IntentService:
         if not normalized_message:
             return self.fallback("客户消息为空，无法判断意图。")
 
+        if len(normalized_message) > MAX_INTENT_MESSAGE_LENGTH:
+            return self.failure_fallback(
+                FailureCode.INPUT_TOO_LONG
+            )
+
         model_input = self.build_model_input(
             normalized_message,
             self.prompt_bundle,
@@ -85,15 +112,21 @@ class IntentService:
                 response_model=IntentExtraction,
                 instructions=self.prompt_bundle.system_prompt,
             )
-        except (LLMError, ValueError) as error:
-            error_code = getattr(
-                error,
-                "code",
-                "INVALID_RESPONSE",
+        except LLMInvalidResponseError:
+            return self.failure_fallback(
+                FailureCode.INVALID_RESPONSE
             )
-            return self.fallback(
-                f"结构化提取失败（{error_code}），"
-                "已使用安全兜底结果。"
+        except LLMRefusalError:
+            return self.failure_fallback(
+                FailureCode.MODEL_REFUSAL
+            )
+        except LLMRateLimitError:
+            return self.failure_fallback(
+                FailureCode.RATE_LIMITED
+            )
+        except (LLMError, ValueError):
+            return self.failure_fallback(
+                FailureCode.INVALID_RESPONSE
             )
 
 

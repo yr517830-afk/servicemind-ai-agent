@@ -133,6 +133,35 @@ data: {"status":"completed"}
 | `done` | 回复正常结束 |
 | `error` | 返回稳定错误码与安全错误信息，并终止当前流 |
 
+### 失败降级事件
+
+模型无法正常响应时，接口仍使用 SSE `error` 事件返回可解析的数据：
+
+```text
+event: error
+data: {"code":"RATE_LIMITED","message":"当前咨询人数较多，智能服务暂时繁忙，请稍后重新尝试。","action":"retry_later","retryable":true}
+```
+
+字段说明：
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `code` | string | 稳定的故障代码 |
+| `message` | string | 可以直接展示给用户的中文提示 |
+| `action` | string | 前端或业务层应执行的降级动作 |
+| `retryable` | boolean | 当前请求稍后重试是否可能成功 |
+
+支持的 Day19 降级动作：
+
+| 故障代码 | action | 处理方式 |
+|---|---|---|
+| `INVALID_RESPONSE` | `use_rules` | 使用安全规则结果继续处理 |
+| `MODEL_REFUSAL` | `human_handoff` | 建议转接人工客服 |
+| `RATE_LIMITED` | `retry_later` | 提示用户稍后重试 |
+| `INPUT_TOO_LONG` | `shorten_input` | 提示保留订单号和主要问题后重新发送 |
+
+超过 2000 个字符的聊天或意图消息会在调用模型前被拦截。普通的 `LLM_NOT_CONFIGURED` 等既有错误仍保留原有错误格式，以兼容旧客户端。
+
 PowerShell 验证：
 
 ```powershell

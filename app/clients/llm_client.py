@@ -52,6 +52,16 @@ class LLMUnavailableError(LLMError):
 
     code = "LLM_UNAVAILABLE"
 
+class LLMInvalidResponseError(LLMError):
+    """LLM 返回的内容无法通过结构化校验。"""
+
+    code = "LLM_INVALID_RESPONSE"
+
+
+class LLMRefusalError(LLMError):
+    """LLM 拒绝处理当前请求。"""
+
+    code = "LLM_REFUSAL"
 
 class LLMClient:
     """封装 OpenAI Responses API。"""
@@ -104,6 +114,27 @@ class LLMClient:
             "max_retries": self.max_retries,
         }
 
+    @staticmethod
+    def response_contains_refusal(response: object) -> bool:
+        """检查 Responses API 输出中是否包含拒答内容。"""
+
+        output_items = getattr(response, "output", [])
+
+        if not isinstance(output_items, (list, tuple)):
+            return False
+
+        for output_item in output_items:
+            content_items = getattr(output_item, "content", [])
+
+            if not isinstance(content_items, (list, tuple)):
+                continue
+
+            for content_item in content_items:
+                if getattr(content_item, "type", "") == "refusal":
+                    return True
+
+        return False
+
     def generate_text(
         self,
         prompt: str,
@@ -135,7 +166,10 @@ class LLMClient:
             raise LLMUnavailableError("LLM 服务返回异常状态。") from None
         except OpenAIError:
             raise LLMUnavailableError("LLM 服务调用失败。") from None
-
+        if self.response_contains_refusal(response):
+            raise LLMRefusalError(
+                "智能服务拒绝处理当前请求，建议转接人工客服。"
+            )
         output_text = response.output_text.strip()
         if not output_text:
             raise LLMUnavailableError("LLM 服务未返回有效文本。")
@@ -173,7 +207,13 @@ class LLMClient:
                     if delta:
                         emitted_text = True
                         yield delta
-
+                elif event_type in {
+                    "response.refusal.delta",
+                    "response.refusal.done",
+                }:
+                    raise LLMRefusalError(
+                        "智能服务拒绝处理当前请求，建议转接人工客服。"
+                    )
                 elif event_type in {"error", "response.failed"}:
                     raise LLMUnavailableError(
                         "LLM 流式响应生成失败。"
@@ -252,16 +292,22 @@ class LLMClient:
             raise LLMUnavailableError(
                 "LLM 服务返回异常状态。"
             ) from None
+        except ValueError:
+            raise LLMInvalidResponseError(
+                "LLM 返回的结构化结果无法通过校验。"
+            ) from None
         except OpenAIError:
             raise LLMUnavailableError(
                 "LLM 服务调用失败。"
             ) from None
 
+        if self.response_contains_refusal(response):
+            raise LLMRefusalError("智能服务拒绝处理当前请求，建议转接人工客服。")
+
         parsed = response.output_parsed
+
         if parsed is None:
-            raise LLMUnavailableError(
-                "LLM 服务未返回有效的结构化结果。"
-            )
+            raise LLMInvalidResponseError("LLM 返回的结构化结果无效。")
 
         return parsed
 

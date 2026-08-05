@@ -1,9 +1,20 @@
 import json
 from collections.abc import Iterator
 
-from app.clients.llm_client import LLMClient, LLMError, llm_client
+from app.clients.llm_client import (
+    LLMClient,
+    LLMError,
+    LLMInvalidResponseError,
+    LLMRateLimitError,
+    LLMRefusalError,
+    llm_client,
+)
 from app.schemas.chat import ChatStreamRequest
+from app.schemas.failures import FailureCode, FailureReply
+from app.services.fallback_service import fallback_service
 
+
+MAX_CHAT_MESSAGE_LENGTH = 2000
 
 CHAT_INSTRUCTIONS = """
 你是 ServiceMind 智能客服助手。
@@ -40,6 +51,29 @@ class ChatService:
     def __init__(self, client: LLMClient = llm_client) -> None:
         self.client = client
 
+    @staticmethod
+    def failure_reply_for(
+        error: LLMError,
+    ) -> FailureReply | None:
+        """将需要降级的 LLM 异常转换为统一回复。"""
+
+        if isinstance(error, LLMInvalidResponseError):
+            return fallback_service.reply_for(
+                FailureCode.INVALID_RESPONSE
+            )
+
+        if isinstance(error, LLMRefusalError):
+            return fallback_service.reply_for(
+                FailureCode.MODEL_REFUSAL
+            )
+
+        if isinstance(error, LLMRateLimitError):
+            return fallback_service.reply_for(
+                FailureCode.RATE_LIMITED
+            )
+
+        return None
+
     def stream(
         self,
         request: ChatStreamRequest,
@@ -53,6 +87,17 @@ class ChatService:
                 "mode": mode,
             },
         )
+
+        if len(request.message) > MAX_CHAT_MESSAGE_LENGTH:
+            reply = fallback_service.reply_for(
+                FailureCode.INPUT_TOO_LONG
+            )
+
+            yield encode_sse_event(
+                "error",
+                reply.model_dump(mode="json"),
+            )
+            return
 
         if request.demo:
             for chunk in DEMO_CHUNKS:
@@ -80,12 +125,19 @@ class ChatService:
                 )
 
         except LLMError as error:
-            yield encode_sse_event(
-                "error",
-                {
+            reply = self.failure_reply_for(error)
+
+            if reply is not None:
+                error_data = reply.model_dump(mode="json")
+            else:
+                error_data = {
                     "code": error.code,
                     "message": str(error),
-                },
+                }
+
+            yield encode_sse_event(
+                "error",
+                error_data,
             )
             return
 

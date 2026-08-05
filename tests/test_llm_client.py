@@ -12,13 +12,16 @@ from openai import (
 from app.clients.llm_client import (
     LLMAuthenticationError,
     LLMClient,
+    LLMInvalidResponseError,
     LLMNotConfiguredError,
     LLMRateLimitError,
+    LLMRefusalError,
     LLMTimeoutError,
     LLMUnavailableError,
 )
 
 from app.schemas.intent import IntentExtraction, IntentType, RiskLevel
+
 
 def configured_client() -> LLMClient:
     """创建不会实际联网的已配置客户端。"""
@@ -140,6 +143,7 @@ def test_llm_client_rejects_empty_response() -> None:
 
     assert error.value.code == "LLM_UNAVAILABLE"
 
+
 def test_llm_client_parses_structured_response() -> None:
     client = configured_client()
     sdk = attach_mock_sdk(client)
@@ -175,13 +179,39 @@ def test_llm_client_rejects_missing_structured_response() -> None:
     sdk = attach_mock_sdk(client)
     sdk.responses.parse.return_value = Mock(output_parsed=None)
 
-    with pytest.raises(LLMUnavailableError) as error:
+    with pytest.raises(LLMInvalidResponseError) as error:
         client.parse_structured(
             "测试无效结构化响应",
             response_model=IntentExtraction,
         )
 
-    assert error.value.code == "LLM_UNAVAILABLE"
+    assert error.value.code == "LLM_INVALID_RESPONSE"
+
+
+def test_llm_client_detects_model_refusal() -> None:
+    client = configured_client()
+    sdk = attach_mock_sdk(client)
+
+    sdk.responses.parse.return_value = Mock(
+        output=[
+            Mock(
+                content=[
+                    Mock(type="refusal"),
+                ]
+            )
+        ],
+        output_parsed=None,
+    )
+
+    with pytest.raises(LLMRefusalError) as error:
+        client.parse_structured(
+            "执行模型不允许处理的请求",
+            response_model=IntentExtraction,
+        )
+
+    assert error.value.code == "LLM_REFUSAL"
+    assert "人工客服" in str(error.value)
+
 
 def test_llm_client_streams_text() -> None:
     client = configured_client()
