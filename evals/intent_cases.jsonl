@@ -1,0 +1,20 @@
+{"id":"logistics-with-order","input":"查询订单 SM-20260808-001 的物流进度","expected_intent":"logistics","expected_risk":"low","annotation_reason":"客户查询指定订单的物流轨迹，没有明显风险。"}
+{"id":"order-status","input":"订单 SM-20260808-002 现在是什么状态？","expected_intent":"order_status","expected_risk":"low","annotation_reason":"客户只查询订单当前状态。"}
+{"id":"refund-request","input":"我要申请订单 SM-20260808-003 的退款","expected_intent":"refund","expected_risk":"medium","annotation_reason":"客户明确提出退款申请，需要核验订单和退款条件。"}
+{"id":"payment-failed","input":"订单 SM-20260808-004 支付失败了","expected_intent":"payment","expected_risk":"medium","annotation_reason":"客户报告正常支付流程失败。"}
+{"id":"unauthorized-payment","input":"发现一笔不是我本人支付的订单","expected_intent":"account_security","expected_risk":"high","annotation_reason":"疑似未授权支付，涉及账户和资金安全。"}
+{"id":"account-stolen","input":"我的账号可能被盗了，登录记录不是我的","expected_intent":"account_security","expected_risk":"high","annotation_reason":"异常登录与账号被盗属于高风险安全问题。"}
+{"id":"logistics-delayed","input":"物流已经十天没有更新","expected_intent":"logistics","expected_risk":"medium","annotation_reason":"物流长时间停滞，需要进一步查询承运状态。"}
+{"id":"damaged-product","input":"收到的商品已经损坏，我要投诉","expected_intent":"complaint","expected_risk":"medium","annotation_reason":"客户对破损商品表达投诉诉求。"}
+{"id":"refund-progress","input":"退款什么时候到账？","expected_intent":"refund","expected_risk":"low","annotation_reason":"客户查询已发起退款的进度。"}
+{"id":"duplicate-charge","input":"银行卡被重复扣款两次","expected_intent":"payment","expected_risk":"high","annotation_reason":"重复扣款涉及资金损失，需要优先处理。"}
+{"id":"missing-delivery","input":"订单 SM-20260808-011 显示已签收但我没有收到","expected_intent":"logistics","expected_risk":"medium","annotation_reason":"签收状态与实际收货情况不一致。"}
+{"id":"query-order","input":"帮我查看订单 SM-20260808-012","expected_intent":"order_status","expected_risk":"low","annotation_reason":"客户提出一般订单查询。"}
+{"id":"service-complaint","input":"客服一直没有处理我的问题，我要投诉","expected_intent":"complaint","expected_risk":"low","annotation_reason":"客户明确投诉服务处理效率。"}
+{"id":"business-hours","input":"你好，请问你们客服几点下班？","expected_intent":"other","expected_risk":"low","annotation_reason":"营业时间咨询不属于订单、支付或售后意图。"}
+{"id":"payment-method","input":"可以使用微信支付吗？","expected_intent":"payment","expected_risk":"low","annotation_reason":"客户咨询可用的付款方式。"}
+{"id":"cancel-refund","input":"订单 SM-20260808-016 的退款申请可以撤销吗？","expected_intent":"refund","expected_risk":"medium","annotation_reason":"客户希望变更正在处理的退款申请。"}
+{"id":"suspicious-login","input":"有人修改了我的登录密码，请马上冻结账号","expected_intent":"account_security","expected_risk":"high","annotation_reason":"密码被他人修改并请求冻结，属于高风险账户安全事件。"}
+{"id":"change-delivery-address","input":"订单 SM-20260808-018 还没发货，能修改收货地址吗？","expected_intent":"logistics","expected_risk":"medium","annotation_reason":"客户希望变更尚未发货订单的配送信息。"}
+{"id":"invoice-order","input":"订单 SM-20260808-019 的电子发票在哪里下载？","expected_intent":"order_status","expected_risk":"low","annotation_reason":"问题围绕指定订单的附属资料查询。"}
+{"id":"unclear-problem","input":"我不知道怎么描述这个问题","expected_intent":"other","expected_risk":"unknown","annotation_reason":"信息不足，无法确定具体业务意图和风险。"}

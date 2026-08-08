@@ -392,6 +392,18 @@ PostgreSQL 17
 - 全项目 102 个 pytest 测试通过
 - Ruff、依赖、Compose 和差异检查通过
 
+### Day 20：小型意图评测集
+
+- 建立 20 条人工标注的意图与风险 JSONL 金标准
+- 覆盖 7 类业务意图和 low、medium、high、unknown 四级风险
+- 保存可复现的基线预测快照，避免离线验收依赖 API Key
+- 评测脚本按样本 id 严格对齐金标准和预测，拒绝缺失、多余及重复记录
+- 输出完全正确数、意图准确率、风险准确率、混淆矩阵及错误原因
+- 基线结果为 17/20 完全正确、90% 意图准确率、95% 风险准确率
+- Docker 镜像升级为 `servicemind-api:day20`
+- 全项目 109 个 pytest 测试通过
+- Ruff、依赖、Compose 和差异检查通过
+
 
 ## 项目结构
 
@@ -454,7 +466,9 @@ servicemind-ai-agent/
 │   ├── api.md
 │   └── er-diagram.md
 ├── evals/
-│   └── intent_extraction_samples.json
+│   ├── intent_cases.jsonl
+│   ├── intent_extraction_samples.json
+│   └── intent_predictions_baseline.jsonl
 ├── prompts/
 │   └── intent_extraction/
 │       ├── v1/
@@ -468,6 +482,7 @@ servicemind-ai-agent/
 ├── scripts/
 │   ├── __init__.py
 │   ├── compare_intent_prompts.py
+│   ├── evaluate_intent_cases.py
 │   ├── query_database.py
 │   └── seed_database.py
 ├── tests/
@@ -477,6 +492,7 @@ servicemind-ai-agent/
 │   ├── test_chat_service.py
 │   ├── test_config.py
 │   ├── test_fallback_service.py
+│   ├── test_intent_evaluation.py
 │   ├── test_intent_service.py
 │   ├── test_llm_client.py
 │   ├── test_models.py
@@ -895,4 +911,20 @@ ServiceMind 不会把模型异常直接暴露给用户。系统将四类重点�
 SSE 错误事件同时返回 `code`、`message`、`action` 和 `retryable`。聊天页面只使用 `textContent` 显示这些信息，不执行模型或错误消息中的 HTML。
 
 当前全项目共有 102 个 pytest 自动化测试，四类降级路径均通过 Mock、Service 和 API 测试验证，不依赖真实 API Key。
+
+## 离线意图评测
+
+Day20 将评测数据与业务测试分离。`evals/intent_cases.jsonl` 保存 20 条人工标注金标准，`evals/intent_predictions_baseline.jsonl` 保存一份固定的候选预测。运行以下命令即可在没有 API Key 的情况下复现统计结果：
+
+```powershell
+python -m scripts.evaluate_intent_cases
+```
+
+评测器同时统计完全正确率、意图准确率和风险准确率，并输出意图混淆矩阵以及每条错误样本的标签差异和预测依据。需要保存机器可读报告时可执行：
+
+```powershell
+python -m scripts.evaluate_intent_cases --json-output evals/day20_report.json
+```
+
+固定基线的结果为完全正确 17/20（85%）、意图正确 18/20（90%）、风险正确 19/20（95%）。该快照用于验证评测流程，不代表线上模型成绩；接入真实模型后应生成新的预测文件再使用同一脚本比较。
 
