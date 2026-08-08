@@ -404,6 +404,15 @@ PostgreSQL 17
 - 全项目 109 个 pytest 测试通过
 - Ruff、依赖、Compose 和差异检查通过
 
+### Day 21：结构化输出工程复盘
+
+- 梳理 Prompt、Schema、程序校验与 Fallback 的职责边界
+- 对比自由文本与结构化输出在解析、测试和系统集成方面的差异
+- 说明 Schema 只能验证格式与类型，语义准确率仍需独立评测集监控
+- 结合 ServiceMind 的意图提取、失败降级和 Day20 评测形成完整复盘
+- 准备可在 2 分钟内讲清结构化输出工程价值的面试表达
+- 新增 `docs/structured_output_review.md` 技术笔记
+
 
 ## 项目结构
 
@@ -464,7 +473,8 @@ servicemind-ai-agent/
 │   └── routing_rules.json
 ├── docs/
 │   ├── api.md
-│   └── er-diagram.md
+│   ├── er-diagram.md
+│   └── structured_output_review.md
 ├── evals/
 │   ├── intent_cases.jsonl
 │   ├── intent_extraction_samples.json
@@ -927,4 +937,10 @@ python -m scripts.evaluate_intent_cases --json-output evals/day20_report.json
 ```
 
 固定基线的结果为完全正确 17/20（85%）、意图正确 18/20（90%）、风险正确 19/20（95%）。该快照用于验证评测流程，不代表线上模型成绩；接入真实模型后应生成新的预测文件再使用同一脚本比较。
+
+## 结构化输出工程复盘
+
+Day21 将前几天的实现串联成一条可靠的 LLM 业务链路：Prompt 说明任务和业务规则，Pydantic Schema 约束字段与类型，程序校验拒绝无法安全处理的结果，Fallback 将故障转换为规则判断、稍后重试、缩短输入或人工转接，独立评测集则持续监控格式合法但语义错误的预测。
+
+完整复盘见 `docs/structured_output_review.md`。其核心观点是：结构化输出不能让模型永远正确，但能让模型结果被校验、测试、监控和安全降级，从而可靠地参与 API、数据库和自动化工作流。
 
